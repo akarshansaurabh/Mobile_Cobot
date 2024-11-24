@@ -1,0 +1,360 @@
+<?xml version="1.0" ?>
+<robot name="r1d1" xmlns:xacro="http://www.ros.org/wiki/xacro" >
+
+    <!-- xacro properties -->
+    <xacro:property name="front_camera_length" value="0.02"/>
+    <xacro:property name="front_camera_breadth" value="0.1"/>
+    <xacro:property name="front_camera_height" value="0.05"/>
+
+    <xacro:property name="rear_camera_length" value="0.02"/>
+    <xacro:property name="rear_camera_breadth" value="0.1"/>
+    <xacro:property name="rear_camera_height" value="0.05"/>
+
+    <xacro:property name="right_camera_length" value="0.02"/>
+    <xacro:property name="right_camera_breadth" value="0.1"/>
+    <xacro:property name="right_camera_height" value="0.05"/>
+
+    <xacro:property name="left_camera_length" value="0.02"/>
+    <xacro:property name="left_camera_breadth" value="0.1"/>
+    <xacro:property name="left_camera_height" value="0.05"/>
+
+    <xacro:property name="lidar_radius" value="0.035"/>
+    <xacro:property name="lidar_length" value="0.065"/>
+
+    <!-- IMU Link -->
+    <link name="imu_link">
+        <visual>
+            <geometry>
+                <box size="0.05 0.05 0.05"/>
+            </geometry>
+            <material name="grey"/>
+        </visual>
+        <collision>
+            <geometry>
+                <box size="0.05 0.05 0.05"/>
+            </geometry>
+        </collision>
+        <inertial>
+            <mass value="0.1"/>
+            <inertia>
+                <ixx value="0.001"/>
+                <iyy value="0.001"/>
+                <izz value="0.001"/>
+                <ixy value="0.0"/>
+                <ixz value="0.0"/>
+                <iyz value="0.0"/>
+            </inertia>
+        </inertial>
+    </link>
+    <!-- IMU Joint -->
+    <joint name="imu_joint" type="fixed">
+        <parent link="base_link"/>
+        <child link="imu_link"/>
+        <origin xyz="0 0 0.1" rpy="0 0 0"/> <!-- Adjust position as needed -->
+    </joint>
+
+
+    <!-- Front Camera -->
+    <link name="front_rgbd_camera_link">
+        <visual>
+            <geometry>
+                <box size="${front_camera_length} ${front_camera_breadth} ${front_camera_height}"/>
+            </geometry>
+            <material name="black"/>
+        </visual>
+        <collision>
+            <geometry>
+                <box size="${front_camera_length} ${front_camera_breadth} ${front_camera_height}"/>
+            </geometry>
+        </collision>
+        <xacro:box_inertia m="0.1" l="${front_camera_length}" b="${front_camera_breadth}" h="${front_camera_height}"
+                           xyz="0 0 0" rpy="0 0 0"/>
+    </link>
+
+    <joint name="front_camera_joint" type="fixed">
+        <parent link="base_link"/>
+        <child link="front_rgbd_camera_link"/>
+        <origin xyz="0.26 0 0.18" rpy="0 0 0"/>
+    </joint>
+
+    <!-- Rear Camera -->
+    <link name="rear_rgbd_camera_link">
+        <visual>
+            <geometry>
+                <box size="${rear_camera_length} ${rear_camera_breadth} ${rear_camera_height}"/>
+            </geometry>
+            <material name="black"/>
+        </visual>
+        <collision>
+            <geometry>
+                <box size="${rear_camera_length} ${rear_camera_breadth} ${rear_camera_height}"/>
+            </geometry>
+        </collision>
+        <xacro:box_inertia m="0.1" l="${rear_camera_length}" b="${rear_camera_breadth}" h="${rear_camera_height}"
+                           xyz="0 0 0" rpy="0 0 0"/>
+    </link>
+
+    <joint name="rear_camera_joint" type="fixed">
+        <parent link="base_link"/>
+        <child link="rear_rgbd_camera_link"/>
+        <origin xyz="-0.26 0 0.18" rpy="0 3.1416 0"/>
+    </joint>
+
+    <!-- Right Camera Link -->
+    <link name="right_rgbd_camera_link">
+        <visual>
+            <geometry>
+                <box size="${right_camera_length} ${right_camera_breadth} ${right_camera_height}"/>
+            </geometry>
+            <material name="black"/>
+        </visual>
+        <collision>
+            <geometry>
+                <box size="${right_camera_length} ${right_camera_breadth} ${right_camera_height}"/>
+            </geometry>
+        </collision>
+        <xacro:box_inertia m="0.1" l="${right_camera_length}" b="${right_camera_breadth}" h="${right_camera_height}"
+                        xyz="0 0 0" rpy="0 0 0"/>
+    </link>
+
+    <joint name="right_camera_joint" type="fixed">
+        <parent link="base_link"/>
+        <child link="right_rgbd_camera_link"/>
+        <origin xyz="0 0.26 0.18" rpy="0 0 1.57"/> <!-- Positioned on the right, facing outward -->
+    </joint>
+
+    <!-- Left Camera Link -->
+    <link name="left_rgbd_camera_link">
+        <visual>
+            <geometry>
+                <box size="${left_camera_length} ${left_camera_breadth} ${left_camera_height}"/>
+            </geometry>
+            <material name="black"/>
+        </visual>
+        <collision>
+            <geometry>
+                <box size="${left_camera_length} ${left_camera_breadth} ${left_camera_height}"/>
+            </geometry>
+        </collision>
+        <xacro:box_inertia m="0.1" l="${left_camera_length}" b="${left_camera_breadth}" h="${left_camera_height}"
+                        xyz="0 0 0" rpy="0 0 0"/>
+    </link>
+
+    <joint name="left_camera_joint" type="fixed">
+        <parent link="base_link"/>
+        <child link="left_rgbd_camera_link"/>
+        <origin xyz="0 -0.26 0.18" rpy="0 0 -1.57"/> <!-- Positioned on the left, facing outward -->
+    </joint>
+
+
+    <!-- LiDAR -->
+    <link name="lidar_link">
+        <visual>
+            <geometry>
+                <cylinder radius="${lidar_radius}" length="${lidar_length}"/>
+            </geometry>
+            <material name="silver"/>
+        </visual>
+        <collision>
+            <geometry>
+                <cylinder radius="${lidar_radius}" length="${lidar_length}"/>
+            </geometry>
+        </collision>
+        <xacro:cylinder_inertia m="1.0" r="${lidar_radius}" h="${lidar_length}"
+                               xyz="0 0 0" rpy="0 0 0"/>
+    </link>
+
+    <joint name="lidar_joint" type="fixed">
+        <parent link="base_link"/>
+        <child link="lidar_link"/>
+        <origin xyz="0.2085 0 0.23" rpy="0 0 0"/>
+    </joint>
+
+
+    <!-- Gazebo Sensor Configurations -->
+    <!-- Front Camera Sensor -->  
+    <gazebo reference="front_rgbd_camera_link">
+        <material>Gazebo/Blue</material>
+        <sensor name="front_rgbd_cam_sensor" type="camera">
+            <pose>0 0 0 0 0 0</pose>
+            <visualize>true</visualize>
+            <update_rate>10.0</update_rate>
+
+            <camera>
+                <horizontal_fov>1.3962634</horizontal_fov>
+                <image>
+                    <width>640</width>
+                    <height>480</height>
+                    <format>R8G8B8</format>
+                </image>
+                <clip>
+                    <near>0.1</near>
+                    <far>10.0</far>
+                </clip>
+            </camera>
+
+            <plugin name="front_rgbd_camera_controller" filename="libgazebo_ros_camera.so">
+                <frame_name>front_rgbd_camera_link</frame_name>
+                <camera_name>front_rgbd_camera</camera_name>
+                <image_topic_name>front_rgbd_camera/image_raw</image_topic_name>
+                <!-- <depth_topic_name>front_rgbd_camera/depth</depth_topic_name> -->
+                <camera_info_topic_name>front_rgbd_camera/camera_info</camera_info_topic_name>
+                <robot_namespace>/r1d1</robot_namespace>
+            </plugin>
+        </sensor>
+    </gazebo>
+
+    <!-- Rear Camera Sensor -->
+    <gazebo reference="rear_rgbd_camera_link">
+        <material>Gazebo/Blue</material>
+        <sensor name="rear_rgbd_cam_sensor" type="camera">
+            <pose>0 0 0 0 3.1416 0</pose>
+            <visualize>true</visualize>
+            <update_rate>10.0</update_rate>
+
+            <camera>
+                <horizontal_fov>1.3962634</horizontal_fov>
+                <image>
+                    <width>640</width>
+                    <height>480</height>
+                    <format>R8G8B8</format>
+                </image>
+                <clip>
+                    <near>0.1</near>
+                    <far>10.0</far>
+                </clip>
+            </camera>
+
+            <plugin name="rear_rgbd_camera_controller" filename="libgazebo_ros_camera.so">
+                <frame_name>rear_rgbd_camera_link</frame_name>
+                <camera_name>rear_rgbd_camera</camera_name>
+                <image_topic_name>rear_rgbd_camera/image_raw</image_topic_name>
+                <camera_info_topic_name>rear_rgbd_camera/camera_info</camera_info_topic_name>
+                <robot_namespace>/r1d1</robot_namespace>
+            </plugin>
+        </sensor>
+    </gazebo>
+
+    <!-- Right Camera Sensor -->
+    <gazebo reference="right_rgbd_camera_link">
+        <material>Gazebo/Blue</material>
+        <sensor name="right_rgbd_cam_sensor" type="camera">
+            <pose>0 0 0 0 0 0</pose>
+            <visualize>true</visualize>
+            <update_rate>10.0</update_rate>
+
+            <camera>
+                <horizontal_fov>1.3962634</horizontal_fov>
+                <image>
+                    <width>640</width>
+                    <height>480</height>
+                    <format>R8G8B8</format>
+                </image>
+                <clip>
+                    <near>0.1</near>
+                    <far>10.0</far>
+                </clip>
+            </camera>
+
+            <plugin name="right_rgbd_camera_controller" filename="libgazebo_ros_camera.so">
+                <frame_name>right_rgbd_camera_link</frame_name>
+                <camera_name>right_rgbd_camera</camera_name>
+                <image_topic_name>right_rgbd_camera/image_raw</image_topic_name>
+                <camera_info_topic_name>right_rgbd_camera/camera_info</camera_info_topic_name>
+                <robot_namespace>/r1d1</robot_namespace>
+            </plugin>
+        </sensor>
+    </gazebo>
+
+    <!-- Left Camera Sensor -->
+    <gazebo reference="left_rgbd_camera_link">
+        <material>Gazebo/Blue</material>
+        <sensor name="left_rgbd_cam_sensor" type="camera">
+            <pose>0 0 0 0 0 0</pose>
+            <visualize>true</visualize>
+            <update_rate>10.0</update_rate>
+
+            <camera>
+                <horizontal_fov>1.3962634</horizontal_fov>
+                <image>
+                    <width>640</width>
+                    <height>480</height>
+                    <format>R8G8B8</format>
+                </image>
+                <clip>
+                    <near>0.1</near>
+                    <far>10.0</far>
+                </clip>
+            </camera>
+
+            <plugin name="left_rgbd_camera_controller" filename="libgazebo_ros_camera.so">
+                <frame_name>left_rgbd_camera_link</frame_name>
+                <camera_name>left_rgbd_camera</camera_name>
+                <image_topic_name>left_rgbd_camera/image_raw</image_topic_name>
+                <camera_info_topic_name>left_rgbd_camera/camera_info</camera_info_topic_name>
+                <robot_namespace>/r1d1</robot_namespace>
+            </plugin>
+        </sensor>
+    </gazebo>
+
+    <!-- LiDAR Sensor -->
+    <gazebo reference="lidar_link">
+        <material>Gazebo/Black</material>
+        <sensor name="lidar_sensor" type="ray">
+            <pose>0 0 0 0 0 0</pose>
+            <visualize>true</visualize>
+            <update_rate>10.0</update_rate>
+
+            <ray>
+                <scan>
+                    <horizontal>
+                        <samples>720</samples>
+                        <resolution>1</resolution>
+                        <min_angle>-2.1</min_angle>
+                        <max_angle>2.1</max_angle>
+                    </horizontal>
+                </scan>
+                <range>
+                    <min>0.1</min>
+                    <max>30.0</max>
+                    <resolution>0.01</resolution>
+                </range>
+            </ray>
+
+            <plugin name="lidar_controller" filename="libgazebo_ros_ray_sensor.so">
+                <ros>
+                    <argument>~/out:=scan</argument>
+                </ros>
+                <output_type>sensor_msgs/LaserScan</output_type>
+                <frame_name>lidar_link</frame_name>
+            </plugin>
+        </sensor>
+    </gazebo>
+
+    <!-- Gazebo IMU Sensor Configuration -->
+    <gazebo reference="imu_link">
+        <sensor name="imu_sensor" type="imu">
+            <always_on>true</always_on>
+            <update_rate>10.0</update_rate>
+            <imu>
+                <topic>imu/data</topic>
+                <noise>
+                    <type>gaussian</type>
+                    <mean>0.0</mean>
+                    <stddev>0.0001</stddev>
+                </noise>
+            </imu>
+            <plugin name="imu_controller" filename="libgazebo_ros_imu.so">
+                <ros>
+                    <namespace>/r1d1</namespace>
+                    <topic>imu/data</topic>
+                </ros>
+                <imu>
+                    <body_name>imu_link</body_name>
+                </imu>
+                <gaussian_noise>0.0001</gaussian_noise>
+            </plugin>
+        </sensor>
+    </gazebo>
+
+</robot>

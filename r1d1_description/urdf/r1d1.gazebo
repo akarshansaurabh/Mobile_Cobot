@@ -1,0 +1,233 @@
+<?xml version="1.0" ?>
+<robot name="r1d1" xmlns:xacro="http://www.ros.org/wiki/xacro" >
+
+<xacro:property name="body_color" value="Gazebo/Silver" />
+<xacro:property name="base_link_color" value="Gazebo/Orange" />
+<xacro:property name="linear_1_color" value="Gazebo/Black" />
+<xacro:property name="arm_base_link_1_color" value="Gazebo/Green" />
+<xacro:property name="shoulder_Link_1_color" value="Gazebo/Green" />
+<xacro:property name="upperarm_Link_1_color" value="Gazebo/Black" />
+<xacro:property name="forearm_Link_1_color" value="Gazebo/Green" />
+<xacro:property name="wrist1_Link_1_color" value="Gazebo/Black" />
+<xacro:property name="wrist2_Link_1_color" value="Gazebo/Green" />
+<xacro:property name="wrist3_Link_1_color" value="Gazebo/Green" />
+
+<gazebo reference="base_link">
+  <material>${base_link_color}</material>
+  <mu1>0.1</mu1>
+  <mu2>0.1</mu2>
+  <self_collide>true</self_collide>
+  <gravity>true</gravity>
+</gazebo>
+
+<gazebo reference="linear_1">
+  <material>${linear_1_color}</material>
+  <mu1>0.2</mu1>
+  <mu2>0.2</mu2>
+  <self_collide>true</self_collide>
+</gazebo>
+
+<gazebo reference="left_wheel_1">
+  <material>${linear_1_color}</material>
+  <mu1>0.4</mu1>
+  <mu2>0.4</mu2>
+  <self_collide>true</self_collide>
+</gazebo>
+
+<gazebo reference="right_wheel_1">
+  <material>${linear_1_color}</material>
+  <mu1>0.4</mu1>
+  <mu2>0.4</mu2>
+  <self_collide>true</self_collide>
+</gazebo>
+
+<gazebo reference="c2_1">
+  <material>${linear_1_color}</material>
+  <mu1>0.1</mu1>
+  <mu2>0.1</mu2>
+  <self_collide>true</self_collide>
+</gazebo>
+
+<gazebo reference="c3_1">
+  <material>${linear_1_color}</material>
+  <mu1>0.1</mu1>
+  <mu2>0.1</mu2>
+  <self_collide>true</self_collide>
+</gazebo>
+
+<gazebo reference="c1_1">
+  <material>${linear_1_color}</material>
+  <mu1>0.1</mu1>
+  <mu2>0.1</mu2>
+  <self_collide>true</self_collide>
+</gazebo>
+
+<gazebo reference="c4_1">
+  <material>${linear_1_color}</material>
+  <mu1>0.1</mu1>
+  <mu2>0.1</mu2>
+  <self_collide>true</self_collide>
+</gazebo>
+
+<gazebo reference="arm_base_link_1">
+  <material>${arm_base_link_1_color}</material>
+  <mu1>0.2</mu1>
+  <mu2>0.2</mu2>
+  <self_collide>true</self_collide>
+</gazebo>
+
+<gazebo reference="shoulder_Link_1">
+  <material>${shoulder_Link_1_color}</material>
+  <mu1>0.2</mu1>
+  <mu2>0.2</mu2>
+  <self_collide>true</self_collide>
+</gazebo>
+
+<gazebo reference="upperarm_Link_1">
+  <material>${upperarm_Link_1_color}</material>
+  <mu1>0.2</mu1>
+  <mu2>0.2</mu2>
+  <self_collide>true</self_collide>
+</gazebo>
+
+<gazebo reference="forearm_Link_1">
+  <material>${forearm_Link_1_color}</material>
+  <mu1>0.2</mu1>
+  <mu2>0.2</mu2>
+  <self_collide>true</self_collide>
+</gazebo>
+
+<gazebo reference="wrist1_Link_1">
+  <material>${wrist1_Link_1_color}</material>
+  <mu1>0.2</mu1>
+  <mu2>0.2</mu2>
+  <self_collide>true</self_collide>
+</gazebo>
+
+<gazebo reference="wrist2_Link_1">
+  <material>${wrist2_Link_1_color}</material>
+  <mu1>0.2</mu1>
+  <mu2>0.2</mu2>
+  <self_collide>true</self_collide>
+</gazebo>
+
+<gazebo reference="wrist3_Link_1">
+  <material>${wrist3_Link_1_color}</material>
+  <mu1>0.2</mu1>
+  <mu2>0.2</mu2>
+  <self_collide>true</self_collide>
+</gazebo>
+
+<!-- <gazebo reference="gripper_base_link">
+  <material>Gazebo/White</material>
+  <mu1>0.2</mu1>
+  <mu2>0.2</mu2>
+  <self_collide>true</self_collide>
+</gazebo>
+
+<gazebo reference="left_outer_knuckle">
+  <material>Gazebo/White</material>
+  <mu1>0.2</mu1>
+  <mu2>0.2</mu2>
+  <self_collide>true</self_collide>
+</gazebo>
+
+<gazebo reference="left_outer_finger">
+  <material>Gazebo/White</material>
+  <mu1>0.2</mu1>
+  <mu2>0.2</mu2>
+  <self_collide>true</self_collide>
+</gazebo>
+
+<gazebo reference="left_inner_knuckle">
+  <material>Gazebo/White</material>
+  <mu1>0.2</mu1>
+  <mu2>0.2</mu2>
+  <self_collide>true</self_collide>
+</gazebo>
+
+<gazebo reference="left_inner_finger">
+  <material>Gazebo/White</material>
+  <mu1>0.2</mu1>
+  <mu2>0.2</mu2>
+  <self_collide>true</self_collide>
+</gazebo>
+
+<gazebo reference="right_inner_knuckle">
+  <material>Gazebo/White</material>
+  <mu1>0.2</mu1>
+  <mu2>0.2</mu2>
+  <self_collide>true</self_collide>
+</gazebo>
+
+<gazebo reference="right_inner_finger">
+  <material>Gazebo/White</material>
+  <mu1>0.2</mu1>
+  <mu2>0.2</mu2>
+  <self_collide>true</self_collide>
+</gazebo>
+
+<gazebo reference="right_outer_knuckle">
+  <material>Gazebo/White</material>
+  <mu1>0.2</mu1>
+  <mu2>0.2</mu2>
+  <self_collide>true</self_collide>
+</gazebo>
+
+<gazebo reference="right_outer_finger">
+  <material>Gazebo/White</material>
+  <mu1>0.2</mu1>
+  <mu2>0.2</mu2>
+  <self_collide>true</self_collide>
+</gazebo> -->
+
+
+<gazebo>
+  <plugin name="gazebo_ros_diff_drive" filename="libgazebo_ros_diff_drive.so">
+
+      <update_rate>500</update_rate>
+
+      <left_joint>left_wheel_joint</left_joint>
+      <right_joint>right_wheel_joint</right_joint>
+
+      <max_wheel_torque>150.0</max_wheel_torque>
+      <max_wheel_acceleration>10.0</max_wheel_acceleration>
+
+      <wheel_separation>0.21</wheel_separation>
+      <wheel_diameter>0.17</wheel_diameter>
+
+      <command_topic>cmd_vel</command_topic>
+
+      <publish_odom>true</publish_odom>
+      <publish_odom_tf>true</publish_odom_tf>
+      <publish_wheel_tf>true</publish_wheel_tf>
+
+      <odometry_topic>odom</odometry_topic>
+      <odometry_frame>odom</odometry_frame>
+      <robot_base_frame>base_footprint</robot_base_frame>
+
+    </plugin>
+</gazebo>
+
+<!-- <xacro:macro name="mimic_joint_plugin_gazebo" params="name_prefix parent_joint mimic_joint has_pid:=false multiplier:=1.0 offset:=0 sensitiveness:=0.0 max_effort:=1.0 robot_namespace:=''">
+		<gazebo>
+			<plugin name="${name_prefix}mimic_joint_plugin" filename="libroboticsgroup_gazebo_mimic_joint_plugin.so">
+				<joint>${parent_joint}</joint>
+				<mimicJoint>${mimic_joint}</mimicJoint>
+				<xacro:if value="${has_pid}">                     
+					<hasPID />
+				</xacro:if>
+				<multiplier>${multiplier}</multiplier>
+				<offset>${offset}</offset>
+				<sensitiveness>${sensitiveness}</sensitiveness>   
+				<maxEffort>${max_effort}</maxEffort>             
+				<xacro:unless value="${robot_namespace == ''}">
+					<robotNamespace>${robot_namespace}</robotNamespace>
+				</xacro:unless>
+			</plugin>
+		</gazebo>
+</xacro:macro> -->
+
+
+
+</robot>
