@@ -22,11 +22,16 @@ find_package(nav2_msgs REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(control_msgs REQUIRED)
 find_package(builtin_interfaces REQUIRED)
-
+find_package(PCL REQUIRED)
 find_package(yaml-cpp REQUIRED)
+find_package(pcl_conversions REQUIRED)
+find_package(pcl_ros REQUIRED)
+find_package(tf2_sensor_msgs REQUIRED)
 
 
-include_directories(include ${YAML_CPP_INCLUDE_DIR})
+include_directories(include ${YAML_CPP_INCLUDE_DIR} ${PCL_INCLUDE_DIR})
+link_directories(${PCL_LIBRARY_DIR})
+add_definitions(${PCL_DEFINITIONS})
 
 add_executable(nav2_client src/navigation/nav2_client.cpp
                src/main/nav2_main.cpp)
@@ -45,6 +50,23 @@ target_link_libraries(nav2_client
   yaml-cpp
 )
 
+add_executable(pc_processing src/pc_processing/pc_processing_1.cpp
+               src/main/pc_processing_main.cpp)
+ament_target_dependencies(pc_processing
+  rclcpp
+  tf2_ros
+  sensor_msgs
+  geometry_msgs
+  rclcpp_action
+  builtin_interfaces
+  pcl_conversions
+  pcl_ros
+  tf2_sensor_msgs
+)
+target_link_libraries(pc_processing
+ ${PCL_LIBRARIES}
+)
+
 add_executable(arm_client src/planner_module/arm_controller.cpp
                src/main/arm_contoller_main.cpp)
 ament_target_dependencies(arm_client
@@ -61,6 +83,7 @@ target_link_libraries(arm_client
 )
 
 install(TARGETS
+  pc_processing
   arm_client
   nav2_client
   DESTINATION lib/${PROJECT_NAME}
