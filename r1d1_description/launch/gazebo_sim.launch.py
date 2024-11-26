@@ -113,7 +113,7 @@ def generate_launch_description():
         package='tf2_ros',
         executable='static_transform_publisher',
         name='link1_broadcaster',
-        arguments=['0', '0', '0', '0', '0', '0', '1', 'map', 'odom'],
+        arguments=['0', '0.025', '0', '0', '0', '0', '1', 'map', 'odom'],
         output='screen'
     )
 
@@ -123,7 +123,7 @@ def generate_launch_description():
         delayed_robot_spawn,
         load_joint_state_broadcaster,
         load_joint_trajectory_controller,
-        static_transform_publisher_node
+        static_transform_publisher_node,
         # nav2_launch
-        # rviz_node
+        rviz_node
     ])

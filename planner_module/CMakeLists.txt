@@ -27,7 +27,8 @@ find_package(yaml-cpp REQUIRED)
 find_package(pcl_conversions REQUIRED)
 find_package(pcl_ros REQUIRED)
 find_package(tf2_sensor_msgs REQUIRED)
-
+find_package(tf2_eigen REQUIRED)
+find_package(nav2_costmap_2d REQUIRED)
 
 include_directories(include ${YAML_CPP_INCLUDE_DIR} ${PCL_INCLUDE_DIR})
 link_directories(${PCL_LIBRARY_DIR})
@@ -55,6 +56,7 @@ add_executable(pc_processing src/pc_processing/pc_processing_1.cpp
 ament_target_dependencies(pc_processing
   rclcpp
   tf2_ros
+  tf2_eigen
   sensor_msgs
   geometry_msgs
   rclcpp_action
@@ -66,6 +68,26 @@ ament_target_dependencies(pc_processing
 target_link_libraries(pc_processing
  ${PCL_LIBRARIES}
 )
+
+
+add_executable(pc_processing2 src/pc_processing/pc_processing_2.cpp
+               src/main/pc_processing_main2.cpp)
+ament_target_dependencies(pc_processing2
+  rclcpp
+  tf2_ros
+  tf2_eigen
+  sensor_msgs
+  geometry_msgs
+  rclcpp_action
+  builtin_interfaces
+  pcl_conversions
+  pcl_ros
+  tf2_sensor_msgs
+)
+target_link_libraries(pc_processing2
+ ${PCL_LIBRARIES}
+)
+
 
 add_executable(arm_client src/planner_module/arm_controller.cpp
                src/main/arm_contoller_main.cpp)
@@ -82,10 +104,28 @@ target_link_libraries(arm_client
   yaml-cpp
 )
 
+add_executable(dynamic_obsnav2 src/obstacle/moving_obstacles.cpp
+               src/main/dynamic_obsnav2_main.cpp)
+ament_target_dependencies(dynamic_obsnav2
+  rclcpp
+  tf2_ros
+  tf2_eigen
+  sensor_msgs
+  geometry_msgs
+  rclcpp_action
+  builtin_interfaces
+  tf2_sensor_msgs
+  nav2_msgs
+  nav_msgs
+  nav2_costmap_2d
+)
+
 install(TARGETS
   pc_processing
+  pc_processing2
   arm_client
   nav2_client
+  dynamic_obsnav2
   DESTINATION lib/${PROJECT_NAME}
 )
 
