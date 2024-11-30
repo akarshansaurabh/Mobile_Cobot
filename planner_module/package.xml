@@ -26,7 +26,10 @@
   <depend>pcl_ros</depend>
   <depend>pcl_msgs</depend>
   <depend>tf2_eigen</depend>
+  <depend>tf2</depend>
+  <depend>map_msgs</depend>
   <depend>nav2_costmap_2d</depend>
+  <depend>visualization_msgs</depend>
 
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>

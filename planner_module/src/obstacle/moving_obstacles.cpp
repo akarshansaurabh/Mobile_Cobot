@@ -92,7 +92,7 @@ namespace obstacleMonitoring
             // Process new obstacles
             if (!new_obstacle_cells.empty())
             {
-                processNewObstacles(new_obstacle_cells, msg->header.stamp, msg->header.frame_id);
+                processNewObstacles(new_obstacle_cells, msg->header.stamp, msg->header.frame_id); // odom
             }
         }
     }
@@ -127,7 +127,8 @@ namespace obstacleMonitoring
             unsigned int my = cell.second;
 
             double wx, wy;
-            obstacle_costmap_->mapToWorld(mx, my, wx, wy);
+            obstacle_costmap_->mapToWorld(mx, my, wx, wy); // odom
+            // transform to map
 
             double dx = wx - robot_x;
             double dy = wy - robot_y;

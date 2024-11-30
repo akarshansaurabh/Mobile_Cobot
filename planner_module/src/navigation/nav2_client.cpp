@@ -398,7 +398,7 @@ namespace custom_Nav2ActionClient
 
   rcl_interfaces::msg::SetParametersResult Nav2ActionClient::DestinationUpdatedCallback(const std::vector<rclcpp::Parameter> &parameters)
   {
-    cout << "callback called" << endl;
+    cout << "parameter callback called" << endl;
     bool destination_changed = false;
     rcl_interfaces::msg::SetParametersResult result;
 

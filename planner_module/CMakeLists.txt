@@ -29,6 +29,10 @@ find_package(pcl_ros REQUIRED)
 find_package(tf2_sensor_msgs REQUIRED)
 find_package(tf2_eigen REQUIRED)
 find_package(nav2_costmap_2d REQUIRED)
+find_package(map_msgs REQUIRED)
+find_package(tf2 REQUIRED)
+find_package(visualization_msgs REQUIRED)
+
 
 include_directories(include ${YAML_CPP_INCLUDE_DIR} ${PCL_INCLUDE_DIR})
 link_directories(${PCL_LIBRARY_DIR})
@@ -83,6 +87,10 @@ ament_target_dependencies(pc_processing2
   pcl_conversions
   pcl_ros
   tf2_sensor_msgs
+  tf2
+  std_msgs
+  tf2_geometry_msgs
+  visualization_msgs
 )
 target_link_libraries(pc_processing2
  ${PCL_LIBRARIES}
@@ -120,11 +128,30 @@ ament_target_dependencies(dynamic_obsnav2
   nav2_costmap_2d
 )
 
+add_executable(gpt src/obstacle/gpt.cpp
+               src/main/gpt_main.cpp)
+ament_target_dependencies(gpt
+  rclcpp
+  tf2_ros
+  tf2_eigen
+  sensor_msgs
+  geometry_msgs
+  rclcpp_action
+  builtin_interfaces
+  tf2_sensor_msgs
+  nav2_msgs
+  nav_msgs
+  nav2_costmap_2d
+  map_msgs
+  tf2
+)
+
 install(TARGETS
   pc_processing
   pc_processing2
   arm_client
   nav2_client
+  gpt
   dynamic_obsnav2
   DESTINATION lib/${PROJECT_NAME}
 )
