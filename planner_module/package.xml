@@ -30,6 +30,8 @@
   <depend>map_msgs</depend>
   <depend>nav2_costmap_2d</depend>
   <depend>visualization_msgs</depend>
+  <!-- <depend>ompl</depend> -->
+  <!-- <depend>octomap</depend> -->
 
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>

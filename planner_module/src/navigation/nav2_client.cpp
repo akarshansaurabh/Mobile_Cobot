@@ -9,7 +9,8 @@ namespace custom_Nav2ActionClient
   Nav2ActionClient::Nav2ActionClient() : Node("nav2_client_node"),
                                          tf_buffer_(this->get_clock()),
                                          tf_listener_(tf_buffer_),
-                                         default_destination_("door_B")
+                                         default_destination_("door_B"),
+                                         cost_map_is_active(false)
   {
     // service name needs to be searched
     single_goal_action_client_ = rclcpp_action::create_client<NavigateToPose>(this, "/navigate_to_pose");
@@ -45,8 +46,103 @@ namespace custom_Nav2ActionClient
 
     global_costmap_param_client_ = std::make_shared<rclcpp::AsyncParametersClient>(this, "/global_costmap/global_costmap");
     local_costmap_param_client_ = std::make_shared<rclcpp::AsyncParametersClient>(this, "/local_costmap/local_costmap");
-    controller_server_param_client_ = std::make_shared<rclcpp::AsyncParametersClient>(this, "controller_server");
-    velocity_smoother_param_client_ = std::make_shared<rclcpp::AsyncParametersClient>(this, "velocity_smoother");
+    controller_server_param_client_ = std::make_shared<rclcpp::AsyncParametersClient>(this, "/controller_server");
+    velocity_smoother_param_client_ = std::make_shared<rclcpp::AsyncParametersClient>(this, "/velocity_smoother");
+    activate_costmap_comparison_param_client_ = std::make_shared<rclcpp::AsyncParametersClient>(this, "/obstacle_monitor_node");
+    table_detection_param_client_ = std::make_shared<rclcpp::AsyncParametersClient>(this, "/pointcloud_transformer_node");
+  }
+
+  void Nav2ActionClient::ActivatePCProcessing_Parameters(string str)
+  {
+    cout << "PCProcessing function called" << endl;
+    if (!table_detection_param_client_->wait_for_service(10s))
+    {
+      RCLCPP_ERROR(this->get_logger(), "PCProcessing parameter service not available.");
+      return;
+    }
+
+    std::vector<rclcpp::Parameter> pc_processing_params;
+    pc_processing_params.emplace_back(rclcpp::Parameter("pc_processing_param", str));
+    auto pc_processing_future = table_detection_param_client_->set_parameters(pc_processing_params);
+
+    std::thread([this, pc_processing_future = std::move(pc_processing_future), pc_processing_params]() mutable
+                {
+      try
+      {
+        std::cout << "Attempting to set parameter 'pc_processing_param'..." << std::endl;
+        auto pc_processing_results = pc_processing_future.get();
+
+        for (size_t i = 0; i < pc_processing_results.size(); ++i)
+        {
+          const auto &result = pc_processing_results[i];
+          const auto &param = pc_processing_params[i];
+          if (!result.successful)
+          {
+            RCLCPP_ERROR(this->get_logger(),
+                         "Failed to set parameter '%s' on pc_processing_param: %s",
+                         param.get_name().c_str(), result.reason.c_str());
+          }
+          else
+          {
+            RCLCPP_INFO(this->get_logger(),
+                        "Successfully set parameter '%s' on pc_processing_param",
+                        param.get_name().c_str());
+          }
+        }
+      }
+      catch (const std::exception &e)
+      {
+        RCLCPP_ERROR(this->get_logger(), "Exception while setting parameters: %s", e.what());
+      }
+      std::cout << "pc_processing_param operation completed." << std::endl; })
+        .detach(); // Detach the thread to allow it to run independently
+    cout << "pc_processing_param function done" << endl;
+  }
+
+  void Nav2ActionClient::ActivateCostmapParameters(bool activate)
+  {
+    cout << "ActivateCostmapParameters function called" << endl;
+    if (!activate_costmap_comparison_param_client_->wait_for_service(10s))
+    {
+      RCLCPP_ERROR(this->get_logger(), "Costmap Update parameter service not available.");
+      return;
+    }
+
+    std::vector<rclcpp::Parameter> costmap_params;
+    costmap_params.emplace_back(rclcpp::Parameter("activate_costmap_comparison", activate));
+    auto costmap_future = activate_costmap_comparison_param_client_->set_parameters(costmap_params);
+    std::thread([this, costmap_future = std::move(costmap_future), costmap_params]() mutable
+                {
+      try
+      {
+        std::cout << "Attempting to set parameter 'activate_costmap_comparison'..." << std::endl;
+        auto costmap_results = costmap_future.get();
+
+        for (size_t i = 0; i < costmap_results.size(); ++i)
+        {
+          const auto &result = costmap_results[i];
+          const auto &param = costmap_params[i];
+          if (!result.successful)
+          {
+            RCLCPP_ERROR(this->get_logger(),
+                         "Failed to set parameter '%s' on activate_costmap_comparison: %s",
+                         param.get_name().c_str(), result.reason.c_str());
+          }
+          else
+          {
+            RCLCPP_INFO(this->get_logger(),
+                        "Successfully set parameter '%s' on activate_costmap_comparison",
+                        param.get_name().c_str());
+          }
+        }
+      }
+      catch (const std::exception &e)
+      {
+        RCLCPP_ERROR(this->get_logger(), "Exception while setting parameters: %s", e.what());
+      }
+      std::cout << "ActivateCostmapParameters operation completed." << std::endl; })
+        .detach(); // Detach the thread to allow it to run independently
+    cout << "ActivateCostmapParameters function done" << endl;
   }
 
   void Nav2ActionClient::SetNav2Parameters()
@@ -82,7 +178,7 @@ namespace custom_Nav2ActionClient
     global_params.emplace_back(rclcpp::Parameter("robot_radius", 0.3));
     global_params.emplace_back(rclcpp::Parameter("inflation_layer.inflation_radius", 0.6));
     local_params.emplace_back(rclcpp::Parameter("robot_radius", 0.3));
-    local_params.emplace_back(rclcpp::Parameter("inflation_layer.inflation_radius", 0.7));
+    local_params.emplace_back(rclcpp::Parameter("inflation_layer.inflation_radius", 0.6));
     // New controller_server parameters
     // controller_params.emplace_back(rclcpp::Parameter("FollowPath.min_vel_x", 0.0));
     // controller_params.emplace_back(rclcpp::Parameter("FollowPath.min_vel_y", 0.0));
@@ -206,17 +302,33 @@ namespace custom_Nav2ActionClient
   void Nav2ActionClient::FeedbackCallBack(const NavigateToPoseGoalHandle::SharedPtr &goal_handle,
                                           const std::shared_ptr<const NavigateToPose::Feedback> feedback)
   {
-    RCLCPP_INFO(this->get_logger(), "Received feedback from the nav2 action server");
+    // RCLCPP_INFO(this->get_logger(), "Received feedback from the nav2 action server");
     (void)goal_handle;
 
-    cout << "current position = " << feedback->current_pose.pose.position.x << " "
-         << feedback->current_pose.pose.position.y << " "
-         << feedback->current_pose.pose.position.z << endl;
-    cout << "current orientation = " << feedback->current_pose.pose.orientation.x << " "
-         << feedback->current_pose.pose.orientation.y << " "
-         << feedback->current_pose.pose.orientation.z << " "
-         << feedback->current_pose.pose.orientation.w << endl;
+    // cout << "current position = " << feedback->current_pose.pose.position.x << " "
+    //      << feedback->current_pose.pose.position.y << " "
+    //      << feedback->current_pose.pose.position.z << endl;
+    // cout << "current orientation = " << feedback->current_pose.pose.orientation.x << " "
+    //      << feedback->current_pose.pose.orientation.y << " "
+    //      << feedback->current_pose.pose.orientation.z << " "
+    //      << feedback->current_pose.pose.orientation.w << endl;
     cout << "distance remaining = " << feedback->distance_remaining << endl;
+    if (feedback->distance_remaining < 2.0 && feedback->distance_remaining >= 0.5 && !cost_map_is_active)
+    {
+      cout << " table detection acticating " << endl;
+      // ActivateCostmapParameters(true);
+      ActivatePCProcessing_Parameters("detect_table");
+      cost_map_is_active = true;
+    }
+    else if (feedback->distance_remaining < 0.5 && cost_map_is_active)
+    {
+      cout << " table detection deacticating " << endl;
+      // ActivateCostmapParameters(false);
+      cost_map_is_active = false;
+    }
+    // 1 - activate
+    // if (new obs) -> pc_processing_3 (find horizontal dominant plane) -> if(plane) -> cancel + waypoints, else -> do nothing
+    // else, do nothing
   }
   void Nav2ActionClient::ResultCallBack(const NavigateToPoseGoalHandle::WrappedResult &result)
   {
@@ -328,7 +440,7 @@ namespace custom_Nav2ActionClient
       if (!config["locations"])
       {
         std::cerr << "Error: 'locations' key not found in the YAML file.\n";
-        return goal; 
+        return goal;
       }
 
       for (const auto &item : config["locations"])

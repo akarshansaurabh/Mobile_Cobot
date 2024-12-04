@@ -5,7 +5,6 @@ using namespace std;
 
 namespace pointcloud_transformer2
 {
-
     PointCloudTransformer::PointCloudTransformer()
         : Node("pointcloud_transformer_node"),
           target_frame_("map"),
@@ -40,7 +39,95 @@ namespace pointcloud_transformer2
         marker_pub_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(
             "/box_marker_array", rclcpp::QoS(10));
 
-        this->declare_parameter("pc_processing", "stop");
+        // table_detection_sub_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
+        //     "/arm_rgbd_camera/points", rclcpp::QoS(10),
+        //     std::bind(&PointCloudTransformer::pointCloud_TableDetectionCallback, this, std::placeholders::_1));
+
+        pointcloud_sub_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
+            "/arm_rgbd_camera/points", rclcpp::QoS(10),
+            std::bind(&PointCloudTransformer::pointCloudCallback, this, std::placeholders::_1));
+
+        this->declare_parameter("pc_processing_param", "stop");
+    }
+
+    void PointCloudTransformer::pointCloud_TableDetectionCallback(const sensor_msgs::msg::PointCloud2::ConstSharedPtr &msg)
+    {
+        cylinder_radius_ = 3.0f;
+        cout << "callback" << endl;
+        // Check for empty point cloud
+        if (msg->width == 0 || msg->height == 0)
+        {
+            RCLCPP_WARN(this->get_logger(), "Received empty point cloud.");
+            return;
+        }
+
+        // Convert ROS PointCloud2 message to PCL PointCloud
+        pcl::PointCloud<pcl::PointXYZRGB>::Ptr pcl_cloud(new pcl::PointCloud<pcl::PointXYZRGB>());
+        pcl::fromROSMsg(*msg, *pcl_cloud);
+
+        // Check if point cloud conversion was successful
+        if (pcl_cloud->empty())
+        {
+            RCLCPP_WARN(this->get_logger(), "Converted PCL point cloud is empty.");
+            return;
+        }
+
+        // Downsample the point cloud using VoxelGrid filter (in-place operation)
+        pcl::VoxelGrid<pcl::PointXYZRGB> voxel_filter;
+        voxel_filter.setInputCloud(pcl_cloud);
+        voxel_filter.setLeafSize(voxel_grid_leaf_size_, voxel_grid_leaf_size_, voxel_grid_leaf_size_);
+        voxel_filter.filter(*pcl_cloud);
+
+        // Remove outliers using StatisticalOutlierRemoval filter (in-place operation)
+        pcl::StatisticalOutlierRemoval<pcl::PointXYZRGB> sor_filter;
+        sor_filter.setInputCloud(pcl_cloud);
+        sor_filter.setMeanK(mean_k_);
+        sor_filter.setStddevMulThresh(std_dev_mul_thresh_);
+        sor_filter.filter(*pcl_cloud);
+
+        // Transform point cloud to target_frame_ (map frame)
+        Eigen::Matrix4f tf_cam_wrt_map = Eigen::Matrix4f::Identity();
+        try
+        {
+            geometry_msgs::msg::TransformStamped tf_armcam_to_map =
+                tf_buffer_->lookupTransform(target_frame_, msg->header.frame_id, msg->header.stamp, rclcpp::Duration::from_seconds(0.1));
+
+            // Convert geometry_msgs Transform to Eigen Matrix
+            Eigen::Affine3d eigen_transform = tf2::transformToEigen(tf_armcam_to_map.transform);
+            tf_cam_wrt_map = eigen_transform.cast<float>().matrix();
+        }
+        catch (tf2::TransformException &ex)
+        {
+            RCLCPP_WARN(this->get_logger(), "Could not transform from %s to %s: %s",
+                        msg->header.frame_id.c_str(), target_frame_.c_str(), ex.what());
+            return;
+        }
+        // pcl_cloud -> source;   tf -> source wrt target
+        pcl::transformPointCloud(*pcl_cloud, *pcl_cloud, tf_cam_wrt_map);
+
+        // Filter points within the cuboidal region
+        filterPointCloudIn_ROI(pcl_cloud, msg->header);
+        // Check if any points remain after filtering
+        if (pcl_cloud->empty())
+        {
+            RCLCPP_WARN(this->get_logger(), "No points remain after cylinder filtering.");
+            table_detection_sub_.reset();
+            return;
+        }
+
+        // Remove dominant planes (floor, walls, table)
+        vector<geometry_msgs::msg::Point> vertices;
+        if (TableIsPresent(pcl_cloud, vertices))
+        {
+            cout << "table is found" << endl;
+            publishTableVertices(vertices);
+        }
+        else
+            cout << "table is NOT found" << endl;
+
+        cylinder_radius_ = 2.0f;
+        table_detection_sub_.reset();
+        cout << "unsubscribing" << endl;
     }
 
     void PointCloudTransformer::pointCloudCallback(const sensor_msgs::msg::PointCloud2::ConstSharedPtr &msg)
@@ -100,7 +187,7 @@ namespace pointcloud_transformer2
         pcl::transformPointCloud(*pcl_cloud, *pcl_cloud, tf_cam_wrt_map);
 
         // Filter points within the cuboidal region
-        filterPointCloudInCylinder(pcl_cloud, msg->header);
+        filterPointCloudIn_ROI(pcl_cloud, msg->header);
         // Check if any points remain after filtering
         if (pcl_cloud->empty())
         {
@@ -168,7 +255,7 @@ namespace pointcloud_transformer2
     }
 
     // imagine cloud wrt map
-    void PointCloudTransformer::filterPointCloudInCylinder(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud, const std_msgs::msg::Header &header_)
+    void PointCloudTransformer::filterPointCloudIn_ROI(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud, const std_msgs::msg::Header &header_)
     {
         // Use PCL's CropBox filter to approximate cylinder filtering for efficiency
         pcl::CropBox<pcl::PointXYZRGB> crop_filter;
@@ -210,6 +297,191 @@ namespace pointcloud_transformer2
         // Filtered output
         pcl::PointCloud<pcl::PointXYZRGB>::Ptr temp_cloud(new pcl::PointCloud<pcl::PointXYZRGB>());
         crop_filter.filter(*cloud);
+    }
+
+    bool PointCloudTransformer::TableIsPresent(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud, vector<geometry_msgs::msg::Point> &vertices)
+    {
+        vertices.clear();
+
+        pcl::ExtractIndices<pcl::PointXYZRGB> extract;
+        extract.setKeepOrganized(false);
+
+        pcl::SACSegmentation<pcl::PointXYZRGB> seg;
+        seg.setOptimizeCoefficients(true);
+        seg.setModelType(pcl::SACMODEL_PLANE);
+        seg.setMethodType(pcl::SAC_RANSAC);
+        seg.setDistanceThreshold(plane_distance_threshold_);
+
+        pcl::ConvexHull<pcl::PointXYZRGB> hull;
+        hull.setDimension(2); // 2D Convex Hull on the plane
+
+        while (true)
+        {
+            if (cloud->points.empty())
+            {
+                std::cout << "Point cloud is empty. No table detected." << std::endl;
+                return false;
+            }
+            pcl::ModelCoefficients::Ptr coefficients(new pcl::ModelCoefficients());
+            pcl::PointIndices::Ptr inliers(new pcl::PointIndices());
+            seg.setInputCloud(cloud);
+            seg.segment(*inliers, *coefficients);
+
+            if (inliers->indices.size() < min_plane_inliers_)
+                break;
+
+            Eigen::Vector3f plane_normal(coefficients->values[0], coefficients->values[1], coefficients->values[2]);
+            plane_normal.normalize();
+
+            double sum_z = 0.0;
+            for (const auto &idx : inliers->indices)
+            {
+                sum_z += cloud->points[idx].z;
+            }
+            double avg_z = sum_z / static_cast<double>(inliers->indices.size());
+            bool is_table = (fabs(plane_normal.dot(Eigen::Vector3f(0, 0, 1))) > 0.95 && (avg_z > 0.2) && (avg_z < 1.5));
+            cout << "average z = " << avg_z << endl;
+
+            extract.setInputCloud(cloud);
+            extract.setIndices(inliers);
+            extract.setNegative((is_table == true) ? false : true);
+            extract.filter(*cloud);
+            if (is_table)
+            {
+                // cloud is the table plane
+
+                // project the table point cloud on the RANSAC plane
+                // pcl::PointCloud<pcl::PointXYZRGB>::Ptr table_projected(new pcl::PointCloud<pcl::PointXYZRGB>());
+                // pcl::ProjectInliers<pcl::PointXYZRGB> proj;
+                // proj.setModelType(pcl::SACMODEL_PLANE);
+                // proj.setInputCloud(cloud);
+                // proj.setModelCoefficients(coefficients);
+                // proj.filter(*table_projected);
+
+                // // Compute the convex hull of the projected table points
+                // pcl::PointCloud<pcl::PointXYZRGB>::Ptr hull_points(new pcl::PointCloud<pcl::PointXYZRGB>());
+                // hull.setInputCloud(table_projected);
+                // hull.reconstruct(*hull_points);
+                // if (hull_points->points.empty())
+                // {
+                //     std::cout << "Convex hull computation failed. Table vertices not extracted." << std::endl;
+                //     return false;
+                // }
+
+                // Eigen::Vector4f centroid;
+                // pcl::compute3DCentroid(*cloud, centroid); // hull_points
+
+                // Eigen::Matrix3f covariance;
+                // pcl::computeCovarianceMatrixNormalized(*cloud, centroid, covariance); // hull_points
+                // Eigen::SelfAdjointEigenSolver<Eigen::Matrix3f> eigen_solver(covariance, Eigen::ComputeEigenvectors);
+                // Eigen::Matrix3f eigVectors = eigen_solver.eigenvectors();
+
+                // Eigen::Vector3f normal = eigVectors.col(0); // Smallest eigenvalue, normal to the plane
+                // if (normal.dot(Eigen::Vector3f(0.0, 0.0, 1.0)) < 0)
+                //     normal = -normal;
+                // Eigen::Vector3f axis1 = eigVectors.col(1); // Largest eigenvalue
+                // Eigen::Vector3f axis2 = eigVectors.col(2); // Middle eigenvalue
+                // // Ensure right-handed coordinate system
+                // axis2 = normal.cross(axis1);
+                // axis2.normalize();
+
+                // Eigen::Vector3f major_axis = axis2; // X or Y axis
+                // Eigen::Vector3f minor_axis = axis1; // X or Y axis
+
+                // double min_x = std::numeric_limits<double>::max();
+                // double max_x = -std::numeric_limits<double>::max();
+                // double min_y = std::numeric_limits<double>::max();
+                // double max_y = -std::numeric_limits<double>::max();
+
+                // for (const auto &point : hull_points->points)
+                // {
+                //     // Vector from centroid to point
+                //     Eigen::Vector3f vec = point.getVector3fMap() - centroid.head<3>();
+                //     // Project onto major and minor axes
+                //     double proj_major = vec.dot(major_axis);
+                //     double proj_minor = vec.dot(minor_axis); // Assuming minor axis
+
+                //     // Update min and max projections
+                //     if (proj_major < min_x)
+                //         min_x = proj_major;
+                //     if (proj_major > max_x)
+                //         max_x = proj_major;
+                //     if (proj_minor < min_y)
+                //         min_y = proj_minor;
+                //     if (proj_minor > max_y)
+                //         max_y = proj_minor;
+                // }
+                double min_x, max_x, min_y, max_y;
+                min_x = max_x = cloud->points[0].x;
+                min_y = max_y = cloud->points[0].y;
+
+                // Iterate through the point cloud once
+                for (const auto &point : cloud->points)
+                {
+                    // const auto &point = cloud->points[i];
+
+                    // Update min and max for X
+                    if (point.x < min_x)
+                        min_x = point.x;
+                    else if (point.x > max_x)
+                        max_x = point.x;
+
+                    // Update min and max for Y
+                    if (point.y < min_y)
+                        min_y = point.y;
+                    else if (point.y > max_y)
+                        max_y = point.y;
+                }
+
+                std::vector<Eigen::Vector3f> table_corners(4);
+                table_corners[0] = Eigen::Vector3f(min_x, min_y, avg_z);
+                table_corners[1] = Eigen::Vector3f(max_x, min_y, avg_z);
+                table_corners[2] = Eigen::Vector3f(max_x, max_y, avg_z);
+                table_corners[3] = Eigen::Vector3f(min_x, max_y, avg_z);
+                // table_corners[0] = centroid.head<3>() + static_cast<float>(min_x) * major_axis + static_cast<float>(min_y) * minor_axis;
+                // table_corners[1] = centroid.head<3>() + static_cast<float>(max_x) * major_axis + static_cast<float>(min_y) * minor_axis;
+                // table_corners[2] = centroid.head<3>() + static_cast<float>(max_x) * major_axis + static_cast<float>(max_y) * minor_axis;
+                // table_corners[3] = centroid.head<3>() + static_cast<float>(min_x) * major_axis + static_cast<float>(max_y) * minor_axis;
+
+                geometry_msgs::msg::Point point;
+                for (const auto &corner : table_corners)
+                {
+                    point.x = corner.x();
+                    point.y = corner.y();
+                    point.z = corner.z();
+                    vertices.emplace_back(std::move(point));
+                }
+
+                // Eigen::Matrix3f rotation;
+                // rotation.col(0) = axis1;  // X-axis
+                // rotation.col(1) = axis2;  // Y-axis
+                // rotation.col(2) = normal; // Z-axis
+
+                // tf2::Matrix3x3 tf_rotation(
+                //     rotation(0, 0), rotation(0, 1), rotation(0, 2),
+                //     rotation(1, 0), rotation(1, 1), rotation(1, 2),
+                //     rotation(2, 0), rotation(2, 1), rotation(2, 2));
+
+                // double roll, pitch, yaw;
+                // tf_rotation.getRPY(roll, pitch, yaw);
+
+                // geometry_msgs::msg::Pose pose;
+                // // Create a pose message
+                // pose.position.x = centroid[0];
+                // pose.position.y = centroid[1];
+                // pose.position.z = centroid[2];
+
+                // // Convert rotation matrix to quaternion
+                // Eigen::Quaternionf quat(rotation);
+                // pose.orientation.x = quat.x();
+                // pose.orientation.y = quat.y();
+                // pose.orientation.z = quat.z();
+                // pose.orientation.w = quat.w();
+                // vector<geometry_msgs::msg::Pose> poses = {pose};
+                // publishMarkerArray(poses);
+                return true;
+            }
+        }
     }
 
     void PointCloudTransformer::removePlanes(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud)
@@ -458,6 +730,42 @@ namespace pointcloud_transformer2
         marker_array.markers.push_back(marker);
     }
 
+    void PointCloudTransformer::publishTableVertices(const std::vector<geometry_msgs::msg::Point> &vertices)
+    {
+        visualization_msgs::msg::Marker table_marker;
+        table_marker.header.frame_id = target_frame_;
+        table_marker.header.stamp = this->now();
+        table_marker.ns = "table_vertices";
+        table_marker.id = 0; // Unique ID for this marker
+        table_marker.type = visualization_msgs::msg::Marker::LINE_STRIP;
+        table_marker.action = visualization_msgs::msg::Marker::ADD;
+
+        table_marker.points.resize(5);
+        for (size_t i = 0; i < 4; ++i)
+            table_marker.points[i] = vertices[i];
+        table_marker.points[4] = vertices[0]; // Close the loop
+
+        // Set the scale (line width)
+        table_marker.scale.x = 0.02; // 2 cm line width
+
+        // Set the color (e.g., Blue)
+        table_marker.color.r = 0.0f;
+        table_marker.color.g = 0.0f;
+        table_marker.color.b = 1.0f;
+        table_marker.color.a = 1.0f; // Fully opaque
+
+        // Optional: Set lifetime (0 means marker persists until overwritten or deleted)
+        table_marker.lifetime = rclcpp::Duration(0, 0);
+
+        // Create a MarkerArray and add the table marker
+        visualization_msgs::msg::MarkerArray marker_array;
+        marker_array.markers.push_back(table_marker);
+
+        // Publish the MarkerArray
+        marker_pub_->publish(marker_array);
+        RCLCPP_INFO(this->get_logger(), "Published table vertices as a LINE_STRIP marker.");
+    }
+
     rcl_interfaces::msg::SetParametersResult PointCloudTransformer::StartPC_ProcessingCallback(const std::vector<rclcpp::Parameter> &parameters)
     {
         cout << "parameter callback called" << endl;
@@ -465,7 +773,7 @@ namespace pointcloud_transformer2
 
         for (const auto &param : parameters)
         {
-            if (param.get_name() == "pc_processing")
+            if (param.get_name() == "pc_processing_param")
             {
                 if (param.get_type() == rclcpp::ParameterType::PARAMETER_STRING)
                 {
@@ -475,17 +783,23 @@ namespace pointcloud_transformer2
                     min_cluster_size_ = 30;
                     max_cluster_size_ = 1000;
                     start_processing_ = param.as_string();
-                    RCLCPP_INFO(this->get_logger(), "pc_processing parameter updated to: '%s'", start_processing_.c_str());
+
+                    RCLCPP_INFO(this->get_logger(), "pc_processing_param parameter updated to: '%s'", start_processing_.c_str());
                     ransac_performed_successfully_ = false;
-                    pointcloud_sub_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
-                        "/arm_rgbd_camera/points", rclcpp::QoS(10),
-                        std::bind(&PointCloudTransformer::pointCloudCallback, this, std::placeholders::_1));
+                    if (start_processing_ == "start_processing")
+                        pointcloud_sub_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
+                            "/arm_rgbd_camera/points", rclcpp::QoS(10),
+                            std::bind(&PointCloudTransformer::pointCloudCallback, this, std::placeholders::_1));
+                    else if (start_processing_ == "detect_table")
+                        table_detection_sub_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
+                            "/arm_rgbd_camera/points", rclcpp::QoS(10),
+                            std::bind(&PointCloudTransformer::pointCloud_TableDetectionCallback, this, std::placeholders::_1));
                 }
                 else
                 {
-                    RCLCPP_ERROR(this->get_logger(), "pc_processing parameter has incorrect type. Expected string.");
+                    RCLCPP_ERROR(this->get_logger(), "pc_processing_param parameter has incorrect type. Expected string.");
                     result.successful = false;
-                    result.reason = "pc_processing parameter must be a string.";
+                    result.reason = "pc_processing_param parameter must be a string.";
                     return result;
                 }
                 break;
@@ -496,5 +810,4 @@ namespace pointcloud_transformer2
         result.reason = "Parameters set successfully.";
         return result;
     }
-
 }

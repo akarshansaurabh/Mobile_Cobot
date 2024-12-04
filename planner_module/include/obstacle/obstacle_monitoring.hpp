@@ -72,8 +72,8 @@ namespace obstacle_monitoring
         bool is_local_costmap_initialized_;
 
         // Laser scan processing
-        void laserScanCallback(const sensor_msgs::msg::LaserScan::SharedPtr msg);
-        void detectMovingObstacles();
+        // void laserScanCallback(const sensor_msgs::msg::LaserScan::SharedPtr msg);
+        // void detectMovingObstacles();
         std::deque<sensor_msgs::msg::LaserScan::SharedPtr> laser_scan_buffer_;
         int laser_scan_buffer_size_;
         double scan_difference_threshold_;

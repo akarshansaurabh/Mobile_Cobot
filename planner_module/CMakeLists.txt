@@ -34,7 +34,10 @@ find_package(tf2 REQUIRED)
 find_package(visualization_msgs REQUIRED)
 
 
-include_directories(include ${YAML_CPP_INCLUDE_DIR} ${PCL_INCLUDE_DIR})
+include_directories(include 
+  ${YAML_CPP_INCLUDE_DIR} 
+  ${PCL_INCLUDE_DIR}
+  )
 link_directories(${PCL_LIBRARY_DIR})
 add_definitions(${PCL_DEFINITIONS})
 
@@ -53,24 +56,6 @@ ament_target_dependencies(nav2_client
 )
 target_link_libraries(nav2_client
   yaml-cpp
-)
-
-add_executable(pc_processing src/pc_processing/pc_processing_1.cpp
-               src/main/pc_processing_main.cpp)
-ament_target_dependencies(pc_processing
-  rclcpp
-  tf2_ros
-  tf2_eigen
-  sensor_msgs
-  geometry_msgs
-  rclcpp_action
-  builtin_interfaces
-  pcl_conversions
-  pcl_ros
-  tf2_sensor_msgs
-)
-target_link_libraries(pc_processing
- ${PCL_LIBRARIES}
 )
 
 
@@ -112,25 +97,9 @@ target_link_libraries(arm_client
   yaml-cpp
 )
 
-add_executable(dynamic_obsnav2 src/obstacle/moving_obstacles.cpp
-               src/main/dynamic_obsnav2_main.cpp)
-ament_target_dependencies(dynamic_obsnav2
-  rclcpp
-  tf2_ros
-  tf2_eigen
-  sensor_msgs
-  geometry_msgs
-  rclcpp_action
-  builtin_interfaces
-  tf2_sensor_msgs
-  nav2_msgs
-  nav_msgs
-  nav2_costmap_2d
-)
-
-add_executable(gpt src/obstacle/gpt.cpp
-               src/main/gpt_main.cpp)
-ament_target_dependencies(gpt
+add_executable(obstacle_monitoring src/obstacle/obstacle_monitoring.cpp
+               src/main/obstacle_monitoring_main.cpp)
+ament_target_dependencies(obstacle_monitoring
   rclcpp
   tf2_ros
   tf2_eigen
@@ -146,13 +115,12 @@ ament_target_dependencies(gpt
   tf2
 )
 
+
 install(TARGETS
-  pc_processing
   pc_processing2
   arm_client
   nav2_client
-  gpt
-  dynamic_obsnav2
+  obstacle_monitoring
   DESTINATION lib/${PROJECT_NAME}
 )
 

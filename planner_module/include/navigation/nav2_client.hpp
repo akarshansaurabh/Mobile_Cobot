@@ -39,14 +39,18 @@ using ComputePathToPoseGoalHandle = rclcpp_action::ClientGoalHandle<ComputePathT
 using FollowPath = nav2_msgs::action::FollowPath;
 using FollowPathGoalHandle = rclcpp_action::ClientGoalHandle<FollowPath>;
 
+using namespace std;
+
 namespace custom_Nav2ActionClient
 {
   class Nav2ActionClient : public rclcpp::Node
   {
   public:
     Nav2ActionClient();
-    void SetCostmapParameters();
+    void ActivateCostmapParameters(bool activate);
     void SetNav2Parameters();
+    void ActivatePCProcessing_Parameters(string str);
+
     void SetInitialPose(const geometry_msgs::msg::PoseWithCovarianceStamped &initial_pose);
 
     void SendGoal(const NavigateToPose::Goal &goal_msg);
@@ -78,15 +82,16 @@ namespace custom_Nav2ActionClient
     // rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
     std::shared_ptr<rclcpp::node_interfaces::OnSetParametersCallbackHandle> parameter_callback_handle_;
 
-    bool goal_active_;
+    bool goal_active_, cost_map_is_active;
     NavigateToPoseGoalHandle::SharedPtr goal_handle_;
     ComputePathToPoseGoalHandle::SharedPtr path_goal_handle_;
-    // Parameter clients 
+    // Parameter clients
     rclcpp::AsyncParametersClient::SharedPtr global_costmap_param_client_;
     rclcpp::AsyncParametersClient::SharedPtr local_costmap_param_client_;
     rclcpp::AsyncParametersClient::SharedPtr controller_server_param_client_;
     rclcpp::AsyncParametersClient::SharedPtr velocity_smoother_param_client_;
-
+    rclcpp::AsyncParametersClient::SharedPtr activate_costmap_comparison_param_client_;
+    rclcpp::AsyncParametersClient::SharedPtr table_detection_param_client_;
     // ros2 params
     std::string destination_, default_destination_;
 

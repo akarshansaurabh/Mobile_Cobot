@@ -113,10 +113,10 @@ def generate_launch_description():
         package='tf2_ros',
         executable='static_transform_publisher',
         name='link1_broadcaster',
-        arguments=['0', '0.025', '0', '0', '0', '0', '1', 'map', 'odom'],
+        arguments=['0', '0.0', '0', '0', '0', '0', '1', 'map', 'odom'],
         output='screen'
     )
-
+    #0.025
     return LaunchDescription([
         gazebo_launch,
         robot_state_publisher_node,
