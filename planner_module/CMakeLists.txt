@@ -81,6 +81,28 @@ target_link_libraries(pc_processing2
  ${PCL_LIBRARIES}
 )
 
+add_executable(pc_processing1 src/pc_processing/pointcloud_processor.cpp
+               src/main/pc_processing_main1.cpp src/visualizations/visualization_manager.cpp)
+ament_target_dependencies(pc_processing1
+  rclcpp
+  tf2_ros
+  tf2_eigen
+  sensor_msgs
+  geometry_msgs
+  rclcpp_action
+  builtin_interfaces
+  pcl_conversions
+  pcl_ros
+  tf2_sensor_msgs
+  tf2
+  std_msgs
+  tf2_geometry_msgs
+  visualization_msgs
+)
+target_link_libraries(pc_processing1
+ ${PCL_LIBRARIES}
+)
+
 
 add_executable(arm_client src/planner_module/arm_controller.cpp
                src/main/arm_contoller_main.cpp)
@@ -117,6 +139,7 @@ ament_target_dependencies(obstacle_monitoring
 
 
 install(TARGETS
+  pc_processing1
   pc_processing2
   arm_client
   nav2_client

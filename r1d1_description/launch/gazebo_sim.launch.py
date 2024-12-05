@@ -116,7 +116,35 @@ def generate_launch_description():
         arguments=['0', '0.0', '0', '0', '0', '0', '1', 'map', 'odom'],
         output='screen'
     )
-    #0.025
+    
+    pc_processing_node = Node(
+        package='planner_module',
+        executable='pc_processing1',
+        parameters=[{'robot_description': robot_description}],
+        output='screen'
+    )
+
+    arm_controller_node = Node(
+        package='planner_module',
+        executable='arm_client',
+        parameters=[{'robot_description': robot_description}],
+        output='screen'
+    )
+
+    nav2_client_node = Node(
+        package='planner_module',
+        executable='nav2_client',
+        parameters=[{'robot_description': robot_description}],
+        output='screen'
+    )
+
+    delayed_arm_controller = TimerAction(
+        period=10.0,
+        actions=[arm_controller_node]
+    )
+
+
+
     return LaunchDescription([
         gazebo_launch,
         robot_state_publisher_node,
@@ -124,6 +152,7 @@ def generate_launch_description():
         load_joint_state_broadcaster,
         load_joint_trajectory_controller,
         static_transform_publisher_node,
-        # nav2_launch
+        # pc_processing_node,
+        delayed_arm_controller,
         rviz_node
     ])

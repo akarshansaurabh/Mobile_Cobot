@@ -9,7 +9,7 @@ namespace custom_Nav2ActionClient
   Nav2ActionClient::Nav2ActionClient() : Node("nav2_client_node"),
                                          tf_buffer_(this->get_clock()),
                                          tf_listener_(tf_buffer_),
-                                         default_destination_("door_B"),
+                                         default_destination_("home"),
                                          cost_map_is_active(false)
   {
     // service name needs to be searched

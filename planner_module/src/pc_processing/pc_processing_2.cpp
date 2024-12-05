@@ -12,7 +12,7 @@ namespace pointcloud_transformer2
           voxel_grid_leaf_size_(0.01), // Smaller leaf size for finer downsampling
           mean_k_(50),                 // Adjusted mean K for outlier removal
           std_dev_mul_thresh_(1.0),    // Tighter threshold for outlier removal
-          cylinder_radius_(2.0f),      // Reduced radius for focused region
+          cylinder_radius_(7.0),       // Reduced radius for focused region
           cylinder_min_z_(0.0f),
           cylinder_max_z_(2.0f),
           min_plane_inliers_(800),
@@ -39,21 +39,12 @@ namespace pointcloud_transformer2
         marker_pub_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(
             "/box_marker_array", rclcpp::QoS(10));
 
-        // table_detection_sub_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
-        //     "/arm_rgbd_camera/points", rclcpp::QoS(10),
-        //     std::bind(&PointCloudTransformer::pointCloud_TableDetectionCallback, this, std::placeholders::_1));
-
-        pointcloud_sub_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
-            "/arm_rgbd_camera/points", rclcpp::QoS(10),
-            std::bind(&PointCloudTransformer::pointCloudCallback, this, std::placeholders::_1));
-
         this->declare_parameter("pc_processing_param", "stop");
     }
 
     void PointCloudTransformer::pointCloud_TableDetectionCallback(const sensor_msgs::msg::PointCloud2::ConstSharedPtr &msg)
     {
-        cylinder_radius_ = 3.0f;
-        cout << "callback" << endl;
+        // cylinder_radius_ = 3.5f;
         // Check for empty point cloud
         if (msg->width == 0 || msg->height == 0)
         {
@@ -77,20 +68,20 @@ namespace pointcloud_transformer2
         voxel_filter.setInputCloud(pcl_cloud);
         voxel_filter.setLeafSize(voxel_grid_leaf_size_, voxel_grid_leaf_size_, voxel_grid_leaf_size_);
         voxel_filter.filter(*pcl_cloud);
-
+        cout << "size after downsampling " << pcl_cloud->points.size() << endl;
         // Remove outliers using StatisticalOutlierRemoval filter (in-place operation)
         pcl::StatisticalOutlierRemoval<pcl::PointXYZRGB> sor_filter;
         sor_filter.setInputCloud(pcl_cloud);
         sor_filter.setMeanK(mean_k_);
         sor_filter.setStddevMulThresh(std_dev_mul_thresh_);
         sor_filter.filter(*pcl_cloud);
-
+        cout << "size after outlier remover " << pcl_cloud->points.size() << endl;
         // Transform point cloud to target_frame_ (map frame)
         Eigen::Matrix4f tf_cam_wrt_map = Eigen::Matrix4f::Identity();
         try
         {
             geometry_msgs::msg::TransformStamped tf_armcam_to_map =
-                tf_buffer_->lookupTransform(target_frame_, msg->header.frame_id, msg->header.stamp, rclcpp::Duration::from_seconds(0.1));
+                tf_buffer_->lookupTransform(target_frame_, msg->header.frame_id, tf2::TimePointZero, tf2::durationFromSec(0.1));
 
             // Convert geometry_msgs Transform to Eigen Matrix
             Eigen::Affine3d eigen_transform = tf2::transformToEigen(tf_armcam_to_map.transform);
@@ -118,14 +109,11 @@ namespace pointcloud_transformer2
         // Remove dominant planes (floor, walls, table)
         vector<geometry_msgs::msg::Point> vertices;
         if (TableIsPresent(pcl_cloud, vertices))
-        {
-            cout << "table is found" << endl;
             publishTableVertices(vertices);
-        }
         else
             cout << "table is NOT found" << endl;
 
-        cylinder_radius_ = 2.0f;
+        // cylinder_radius_ = 2.0f;
         table_detection_sub_.reset();
         cout << "unsubscribing" << endl;
     }
@@ -158,20 +146,20 @@ namespace pointcloud_transformer2
         voxel_filter.setInputCloud(pcl_cloud);
         voxel_filter.setLeafSize(voxel_grid_leaf_size_, voxel_grid_leaf_size_, voxel_grid_leaf_size_);
         voxel_filter.filter(*pcl_cloud);
-
+        cout << "size after downsampling " << pcl_cloud->points.size() << endl;
         // Remove outliers using StatisticalOutlierRemoval filter (in-place operation)
         pcl::StatisticalOutlierRemoval<pcl::PointXYZRGB> sor_filter;
         sor_filter.setInputCloud(pcl_cloud);
         sor_filter.setMeanK(mean_k_);
         sor_filter.setStddevMulThresh(std_dev_mul_thresh_);
         sor_filter.filter(*pcl_cloud);
-
+        cout << "size after outlier remover " << pcl_cloud->points.size() << endl;
         // Transform point cloud to target_frame_ (map frame)
         Eigen::Matrix4f tf_cam_wrt_map = Eigen::Matrix4f::Identity();
         try
         {
             geometry_msgs::msg::TransformStamped tf_armcam_to_map =
-                tf_buffer_->lookupTransform(target_frame_, msg->header.frame_id, msg->header.stamp, rclcpp::Duration::from_seconds(0.1));
+                tf_buffer_->lookupTransform(target_frame_, msg->header.frame_id, tf2::TimePointZero, tf2::durationFromSec(0.1));
 
             // Convert geometry_msgs Transform to Eigen Matrix
             Eigen::Affine3d eigen_transform = tf2::transformToEigen(tf_armcam_to_map.transform);
@@ -247,7 +235,7 @@ namespace pointcloud_transformer2
 
         // Log the processing time
         RCLCPP_INFO(this->get_logger(), "Processed point cloud in %ld ms.", processing_time);
-        if (!ransac_performed_successfully_ || sub_counter > 2)
+        if (!ransac_performed_successfully_ || sub_counter > 2 || box_found)
         {
             cout << "resetting" << endl;
             pointcloud_sub_.reset();
@@ -312,9 +300,6 @@ namespace pointcloud_transformer2
         seg.setMethodType(pcl::SAC_RANSAC);
         seg.setDistanceThreshold(plane_distance_threshold_);
 
-        pcl::ConvexHull<pcl::PointXYZRGB> hull;
-        hull.setDimension(2); // 2D Convex Hull on the plane
-
         while (true)
         {
             if (cloud->points.empty())
@@ -340,7 +325,6 @@ namespace pointcloud_transformer2
             }
             double avg_z = sum_z / static_cast<double>(inliers->indices.size());
             bool is_table = (fabs(plane_normal.dot(Eigen::Vector3f(0, 0, 1))) > 0.95 && (avg_z > 0.2) && (avg_z < 1.5));
-            cout << "average z = " << avg_z << endl;
 
             extract.setInputCloud(cloud);
             extract.setIndices(inliers);
@@ -349,68 +333,6 @@ namespace pointcloud_transformer2
             if (is_table)
             {
                 // cloud is the table plane
-
-                // project the table point cloud on the RANSAC plane
-                // pcl::PointCloud<pcl::PointXYZRGB>::Ptr table_projected(new pcl::PointCloud<pcl::PointXYZRGB>());
-                // pcl::ProjectInliers<pcl::PointXYZRGB> proj;
-                // proj.setModelType(pcl::SACMODEL_PLANE);
-                // proj.setInputCloud(cloud);
-                // proj.setModelCoefficients(coefficients);
-                // proj.filter(*table_projected);
-
-                // // Compute the convex hull of the projected table points
-                // pcl::PointCloud<pcl::PointXYZRGB>::Ptr hull_points(new pcl::PointCloud<pcl::PointXYZRGB>());
-                // hull.setInputCloud(table_projected);
-                // hull.reconstruct(*hull_points);
-                // if (hull_points->points.empty())
-                // {
-                //     std::cout << "Convex hull computation failed. Table vertices not extracted." << std::endl;
-                //     return false;
-                // }
-
-                // Eigen::Vector4f centroid;
-                // pcl::compute3DCentroid(*cloud, centroid); // hull_points
-
-                // Eigen::Matrix3f covariance;
-                // pcl::computeCovarianceMatrixNormalized(*cloud, centroid, covariance); // hull_points
-                // Eigen::SelfAdjointEigenSolver<Eigen::Matrix3f> eigen_solver(covariance, Eigen::ComputeEigenvectors);
-                // Eigen::Matrix3f eigVectors = eigen_solver.eigenvectors();
-
-                // Eigen::Vector3f normal = eigVectors.col(0); // Smallest eigenvalue, normal to the plane
-                // if (normal.dot(Eigen::Vector3f(0.0, 0.0, 1.0)) < 0)
-                //     normal = -normal;
-                // Eigen::Vector3f axis1 = eigVectors.col(1); // Largest eigenvalue
-                // Eigen::Vector3f axis2 = eigVectors.col(2); // Middle eigenvalue
-                // // Ensure right-handed coordinate system
-                // axis2 = normal.cross(axis1);
-                // axis2.normalize();
-
-                // Eigen::Vector3f major_axis = axis2; // X or Y axis
-                // Eigen::Vector3f minor_axis = axis1; // X or Y axis
-
-                // double min_x = std::numeric_limits<double>::max();
-                // double max_x = -std::numeric_limits<double>::max();
-                // double min_y = std::numeric_limits<double>::max();
-                // double max_y = -std::numeric_limits<double>::max();
-
-                // for (const auto &point : hull_points->points)
-                // {
-                //     // Vector from centroid to point
-                //     Eigen::Vector3f vec = point.getVector3fMap() - centroid.head<3>();
-                //     // Project onto major and minor axes
-                //     double proj_major = vec.dot(major_axis);
-                //     double proj_minor = vec.dot(minor_axis); // Assuming minor axis
-
-                //     // Update min and max projections
-                //     if (proj_major < min_x)
-                //         min_x = proj_major;
-                //     if (proj_major > max_x)
-                //         max_x = proj_major;
-                //     if (proj_minor < min_y)
-                //         min_y = proj_minor;
-                //     if (proj_minor > max_y)
-                //         max_y = proj_minor;
-                // }
                 double min_x, max_x, min_y, max_y;
                 min_x = max_x = cloud->points[0].x;
                 min_y = max_y = cloud->points[0].y;
@@ -418,15 +340,10 @@ namespace pointcloud_transformer2
                 // Iterate through the point cloud once
                 for (const auto &point : cloud->points)
                 {
-                    // const auto &point = cloud->points[i];
-
-                    // Update min and max for X
                     if (point.x < min_x)
                         min_x = point.x;
                     else if (point.x > max_x)
                         max_x = point.x;
-
-                    // Update min and max for Y
                     if (point.y < min_y)
                         min_y = point.y;
                     else if (point.y > max_y)
@@ -438,10 +355,6 @@ namespace pointcloud_transformer2
                 table_corners[1] = Eigen::Vector3f(max_x, min_y, avg_z);
                 table_corners[2] = Eigen::Vector3f(max_x, max_y, avg_z);
                 table_corners[3] = Eigen::Vector3f(min_x, max_y, avg_z);
-                // table_corners[0] = centroid.head<3>() + static_cast<float>(min_x) * major_axis + static_cast<float>(min_y) * minor_axis;
-                // table_corners[1] = centroid.head<3>() + static_cast<float>(max_x) * major_axis + static_cast<float>(min_y) * minor_axis;
-                // table_corners[2] = centroid.head<3>() + static_cast<float>(max_x) * major_axis + static_cast<float>(max_y) * minor_axis;
-                // table_corners[3] = centroid.head<3>() + static_cast<float>(min_x) * major_axis + static_cast<float>(max_y) * minor_axis;
 
                 geometry_msgs::msg::Point point;
                 for (const auto &corner : table_corners)
@@ -451,34 +364,6 @@ namespace pointcloud_transformer2
                     point.z = corner.z();
                     vertices.emplace_back(std::move(point));
                 }
-
-                // Eigen::Matrix3f rotation;
-                // rotation.col(0) = axis1;  // X-axis
-                // rotation.col(1) = axis2;  // Y-axis
-                // rotation.col(2) = normal; // Z-axis
-
-                // tf2::Matrix3x3 tf_rotation(
-                //     rotation(0, 0), rotation(0, 1), rotation(0, 2),
-                //     rotation(1, 0), rotation(1, 1), rotation(1, 2),
-                //     rotation(2, 0), rotation(2, 1), rotation(2, 2));
-
-                // double roll, pitch, yaw;
-                // tf_rotation.getRPY(roll, pitch, yaw);
-
-                // geometry_msgs::msg::Pose pose;
-                // // Create a pose message
-                // pose.position.x = centroid[0];
-                // pose.position.y = centroid[1];
-                // pose.position.z = centroid[2];
-
-                // // Convert rotation matrix to quaternion
-                // Eigen::Quaternionf quat(rotation);
-                // pose.orientation.x = quat.x();
-                // pose.orientation.y = quat.y();
-                // pose.orientation.z = quat.z();
-                // pose.orientation.w = quat.w();
-                // vector<geometry_msgs::msg::Pose> poses = {pose};
-                // publishMarkerArray(poses);
                 return true;
             }
         }
@@ -494,8 +379,7 @@ namespace pointcloud_transformer2
         seg.setMethodType(pcl::SAC_RANSAC);
         seg.setDistanceThreshold(plane_distance_threshold_);
 
-        bool plane_is_present = true;
-        while (plane_is_present)
+        while (true)
         {
             pcl::ModelCoefficients::Ptr coefficients(new pcl::ModelCoefficients());
             pcl::PointIndices::Ptr inliers(new pcl::PointIndices());
@@ -505,7 +389,6 @@ namespace pointcloud_transformer2
             if (inliers->indices.size() < min_plane_inliers_)
             {
                 // No more significant planes found
-                plane_is_present = false;
                 break;
             }
 
@@ -529,7 +412,6 @@ namespace pointcloud_transformer2
             else
             {
                 // Plane does not match floor, wall, or table; stop removing
-                plane_is_present = false;
                 break;
             }
         }
@@ -566,14 +448,22 @@ namespace pointcloud_transformer2
 
         // Perform plane segmentation to find planar surfaces in the cluster
         pcl::PointCloud<pcl::PointXYZRGB>::Ptr cluster_copy(new pcl::PointCloud<pcl::PointXYZRGB>(*cluster));
+        if (cluster_copy->points.size() < 1) // min_required_points_for_RANSAC_
+        {
+            RCLCPP_WARN(this->get_logger(), "Cluster has too few points for plane segmentation.");
+            ransac_performed_successfully_ = true;
+            voxel_grid_leaf_size_ /= 2.0;
+            min_plane_inliers_ *= 2;
+            min_cluster_size_ *= 2;
+            max_cluster_size_ *= 2;
+            return false;
+        }
         pcl::SACSegmentation<pcl::PointXYZRGB> seg;
         pcl::ExtractIndices<pcl::PointXYZRGB> extract_plane;
         seg.setOptimizeCoefficients(true);
         seg.setModelType(pcl::SACMODEL_PLANE);
         seg.setMethodType(pcl::SAC_RANSAC);
         seg.setDistanceThreshold(plane_distance_threshold_);
-
-        double max_z = -std::numeric_limits<double>::max();
 
         int num_planes_extracted = 0;
         bool top_face_found = false;
@@ -582,17 +472,6 @@ namespace pointcloud_transformer2
             pcl::ModelCoefficients::Ptr coefficients(new pcl::ModelCoefficients());
             pcl::PointIndices::Ptr inliers(new pcl::PointIndices());
             seg.setInputCloud(cluster_copy);
-            // Ensure cluster_copy has enough points before calling seg.segment
-            if (cluster_copy->points.size() < 1) // min_required_points_for_RANSAC_
-            {
-                RCLCPP_WARN(this->get_logger(), "Cluster has too few points for plane segmentation.");
-                ransac_performed_successfully_ = true;
-                voxel_grid_leaf_size_ /= 2.0;
-                min_plane_inliers_ *= 2;
-                min_cluster_size_ *= 2;
-                max_cluster_size_ *= 2;
-                return false;
-            }
             seg.segment(*inliers, *coefficients);
 
             if (inliers->indices.empty())
@@ -610,43 +489,53 @@ namespace pointcloud_transformer2
             extract_plane.setNegative((fabs(plane_normal.dot(Eigen::Vector3f(0, 0, 1))) > 0.95) ? false : true);
             extract_plane.filter(*cluster_copy);
             num_planes_extracted++;
-            if (fabs(plane_normal.dot(Eigen::Vector3f(0, 0, 1))) > 0.95)
+            if (fabs(plane_normal.dot(Eigen::Vector3f(0, 0, 1))) > 0.95)  //horizontal
             {
-                top_face_found = true;
-                Eigen::Vector4f centroid;
-                pcl::compute3DCentroid(*cluster_copy, centroid); // top_face_cloud
-                Eigen::Matrix3f covariance;
-                pcl::computeCovarianceMatrixNormalized(*cluster_copy, centroid, covariance); // top_face_cloud
-                // Perform PCA (Eigen Decomposition)
-                Eigen::SelfAdjointEigenSolver<Eigen::Matrix3f> eigen_solver(covariance, Eigen::ComputeEigenvectors);
-                Eigen::Matrix3f eig_vectors = eigen_solver.eigenvectors();
-                // Assign axes correctly
-                Eigen::Vector3f normal = eig_vectors.col(0); // Smallest eigenvalue, normal to the plane
-                if (normal.dot(Eigen::Vector3f(0.0, 0.0, 1.0)) < 0)
-                    normal = -normal;
-                Eigen::Vector3f axis1 = eig_vectors.col(1); // Largest eigenvalue
-                Eigen::Vector3f axis2 = eig_vectors.col(2); // Middle eigenvalue
-                // Ensure right-handed coordinate system
-                axis2 = normal.cross(axis1);
-                axis2.normalize();
-                // Construct rotation matrix
-                Eigen::Matrix3f rotation;
-                rotation.col(0) = axis1;  // X-axis
-                rotation.col(1) = axis2;  // Y-axis
-                rotation.col(2) = normal; // Z-axis
+                double sum_z = 0.0;
+                for (const auto &point : cluster_copy->points)
+                {
+                    sum_z += point.z;
+                }
+                double avg_z = sum_z / static_cast<double>(cluster_copy->points.size());
+                bool is_topface = ((avg_z > 0.5) && (avg_z < 2.0));
+                if (is_topface)
+                {
+                    top_face_found = true;
+                    Eigen::Vector4f centroid;
+                    pcl::compute3DCentroid(*cluster_copy, centroid); // top_face_cloud
+                    Eigen::Matrix3f covariance;
+                    pcl::computeCovarianceMatrixNormalized(*cluster_copy, centroid, covariance); // top_face_cloud
+                    // Perform PCA (Eigen Decomposition)
+                    Eigen::SelfAdjointEigenSolver<Eigen::Matrix3f> eigen_solver(covariance, Eigen::ComputeEigenvectors);
+                    Eigen::Matrix3f eig_vectors = eigen_solver.eigenvectors();
+                    // Assign axes correctly
+                    Eigen::Vector3f normal = eig_vectors.col(0); // Smallest eigenvalue, normal to the plane
+                    if (normal.dot(Eigen::Vector3f(0.0, 0.0, 1.0)) < 0)
+                        normal = -normal;
+                    Eigen::Vector3f axis1 = eig_vectors.col(1); // Largest eigenvalue
+                    Eigen::Vector3f axis2 = eig_vectors.col(2); // Middle eigenvalue
+                    // Ensure right-handed coordinate system
+                    axis2 = normal.cross(axis1);
+                    axis2.normalize();
+                    // Construct rotation matrix
+                    Eigen::Matrix3f rotation;
+                    rotation.col(0) = axis1;  // X-axis
+                    rotation.col(1) = axis2;  // Y-axis
+                    rotation.col(2) = normal; // Z-axis
 
-                // Create a pose message
-                box_pose.position.x = centroid[0];
-                box_pose.position.y = centroid[1];
-                box_pose.position.z = centroid[2];
+                    // Create a pose message
+                    box_pose.position.x = centroid[0];
+                    box_pose.position.y = centroid[1];
+                    box_pose.position.z = centroid[2];
 
-                // Convert rotation matrix to quaternion
-                Eigen::Quaternionf quat(rotation);
-                box_pose.orientation.x = quat.x();
-                box_pose.orientation.y = quat.y();
-                box_pose.orientation.z = quat.z();
-                box_pose.orientation.w = quat.w();
-                break;
+                    // Convert rotation matrix to quaternion
+                    Eigen::Quaternionf quat(rotation);
+                    box_pose.orientation.x = quat.x();
+                    box_pose.orientation.y = quat.y();
+                    box_pose.orientation.z = quat.z();
+                    box_pose.orientation.w = quat.w();
+                    break;
+                }
             }
         }
         *top_faces_cloud += *cluster_copy;
