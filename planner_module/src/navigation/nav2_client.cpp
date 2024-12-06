@@ -14,7 +14,6 @@ namespace custom_Nav2ActionClient
   {
     // service name needs to be searched
     single_goal_action_client_ = rclcpp_action::create_client<NavigateToPose>(this, "/navigate_to_pose");
-    controller_action_client_ = rclcpp_action::create_client<FollowPath>(this, "/follow_path");
     global_planner_action_client_ = rclcpp_action::create_client<ComputePathToPose>(this, "/compute_path_to_pose");
 
     // this->create_subscription<nav_msgs::msg::Odometry>(

@@ -32,11 +32,13 @@ find_package(nav2_costmap_2d REQUIRED)
 find_package(map_msgs REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(visualization_msgs REQUIRED)
-
+find_package(ruckig REQUIRED)
+find_package(kdl_parser REQUIRED)
 
 include_directories(include 
   ${YAML_CPP_INCLUDE_DIR} 
   ${PCL_INCLUDE_DIR}
+  ${ruckig_INCLUDE_DIRS}
   )
 link_directories(${PCL_LIBRARY_DIR})
 add_definitions(${PCL_DEFINITIONS})
@@ -55,6 +57,23 @@ ament_target_dependencies(nav2_client
   builtin_interfaces
 )
 target_link_libraries(nav2_client
+  yaml-cpp
+)
+
+add_executable(nav2_client2 src/navigation/nav2_client2.cpp
+               src/main/nav2_main2.cpp)
+ament_target_dependencies(nav2_client2
+  rclcpp
+  tf2_ros
+  yaml-cpp
+  nav_msgs
+  nav2_msgs
+  geometry_msgs
+  rclcpp_action
+  trajectory_msgs
+  builtin_interfaces
+)
+target_link_libraries(nav2_client2
   yaml-cpp
 )
 
@@ -143,6 +162,7 @@ install(TARGETS
   pc_processing2
   arm_client
   nav2_client
+  nav2_client2
   obstacle_monitoring
   DESTINATION lib/${PROJECT_NAME}
 )

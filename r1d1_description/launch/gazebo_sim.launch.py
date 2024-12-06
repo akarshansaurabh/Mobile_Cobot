@@ -133,13 +133,13 @@ def generate_launch_description():
 
     nav2_client_node = Node(
         package='planner_module',
-        executable='nav2_client',
+        executable='nav2_client2',
         parameters=[{'robot_description': robot_description}],
         output='screen'
     )
 
     delayed_arm_controller = TimerAction(
-        period=10.0,
+        period=7.0,
         actions=[arm_controller_node]
     )
 

@@ -21,7 +21,6 @@
 #include "tf2_ros/buffer.h"
 #include "tf2_ros/transform_listener.h"
 
-#include "nav2_msgs/action/follow_path.hpp"
 #include "nav2_msgs/action/navigate_to_pose.hpp"
 #include "nav2_msgs/action/compute_path_to_pose.hpp"
 #include "nav2_msgs/action/navigate_through_poses.hpp"
@@ -35,9 +34,6 @@ using NavigateToPoseGoalHandle = rclcpp_action::ClientGoalHandle<NavigateToPose>
 
 using ComputePathToPose = nav2_msgs::action::ComputePathToPose;
 using ComputePathToPoseGoalHandle = rclcpp_action::ClientGoalHandle<ComputePathToPose>;
-
-using FollowPath = nav2_msgs::action::FollowPath;
-using FollowPathGoalHandle = rclcpp_action::ClientGoalHandle<FollowPath>;
 
 using namespace std;
 
@@ -75,7 +71,6 @@ namespace custom_Nav2ActionClient
 
     rclcpp_action::Client<NavigateToPose>::SharedPtr single_goal_action_client_;
     rclcpp_action::Client<ComputePathToPose>::SharedPtr global_planner_action_client_;
-    rclcpp_action::Client<FollowPath>::SharedPtr controller_action_client_;
 
     rclcpp::Publisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr initial_pose_pub_;
     rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr path_publisher_;
