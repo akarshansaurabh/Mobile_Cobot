@@ -17,9 +17,14 @@
 #include "geometry_msgs/msg/pose_stamped.hpp"
 #include "geometry_msgs/msg/pose_with_covariance_stamped.hpp"
 #include "geometry_msgs/msg/transform_stamped.hpp"
+#include <geometry_msgs/msg/pose_stamped.hpp>
 
 #include "tf2_ros/buffer.h"
 #include "tf2_ros/transform_listener.h"
+#include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
+#include <tf2/LinearMath/Quaternion.h>
+#include <tf2/LinearMath/Matrix3x3.h>
+#include <tf2/utils.h>
 
 #include "nav2_msgs/action/navigate_to_pose.hpp"
 #include "nav2_msgs/action/compute_path_to_pose.hpp"
@@ -29,6 +34,12 @@
 #include "nav_msgs/msg/path.hpp"
 
 #include <yaml-cpp/yaml.h>
+
+#include "planner_module/waypoint_gen.hpp"
+#include "planner_module/planner_correction.hpp"
+
+#include "std_msgs/msg/float64.hpp"
+#include "std_msgs/msg/string.hpp"
 
 namespace custom_nav2_action_client2
 {
@@ -55,6 +66,7 @@ namespace custom_nav2_action_client2
         using GoalHandle = rclcpp_action::ClientGoalHandle<ActionType>;
 
         explicit NavigateToPoseClient(rclcpp::Node::SharedPtr node);
+        void initialize();
 
         void SendGoal(const ActionType::Goal &goal_msg);
         void CancelGoal();
@@ -62,11 +74,18 @@ namespace custom_nav2_action_client2
         void FeedbackCallback(const GoalHandle::SharedPtr &goal_handle,
                               const std::shared_ptr<const ActionType::Feedback> feedback);
         void ResultCallback(const GoalHandle::WrappedResult &result);
+        bool is_table_destination_; // to indicate if current destination is a table or a door/home
 
     private:
         rclcpp_action::Client<ActionType>::SharedPtr action_client_;
         GoalHandle::SharedPtr goal_handle_;
         bool goal_active_;
+        ActionType::Goal nav_to_pose_desired_pose_;
+        double desired_yaw;
+        std::shared_ptr<planner_correction::AMRCorrection> amr_correction_;
+        geometry_msgs::msg::PoseStamped nav_to_pose_actual_pose_;
+        rclcpp::Subscription<geometry_msgs::msg::Vector3>::SharedPtr move_amr_sub_;
+        void MoveAMRCallBack(const geometry_msgs::msg::Vector3::ConstSharedPtr &msg);
     };
 
     // Class for handling ComputePathToPose action
@@ -95,7 +114,7 @@ namespace custom_nav2_action_client2
         rclcpp_action::Client<ActionType>::SharedPtr action_client_;
         GoalHandle::SharedPtr goal_handle_;
         bool goal_active_;
-        bool next_goal_is_p1_;
+        bool current_goal_is_p1_;
         Nav2Utilities *utilities_{nullptr};
     };
 
@@ -148,6 +167,8 @@ namespace custom_nav2_action_client2
         // This allows us to handle P1/P2 logic after results are received.
         void OnPathComputed(const nav_msgs::msg::Path &path, bool is_p1);
 
+        std::unique_ptr<waypointGen::TablePathAnalyzer> table_analyser;
+
     private:
         rclcpp::Node::SharedPtr node_;
 
@@ -185,20 +206,14 @@ namespace custom_nav2_action_client2
         nav_msgs::msg::Path p2_path_;
         geometry_msgs::msg::PoseStamped current_pose_;
         nav2_msgs::action::NavigateToPose::Goal destination_goal_; // final goal from YAML
-        bool is_table_destination_;                                // to indicate if current destination is a table or a door/home
-
-        // Helper method to send two compute_path_to_pose goals P1 and P2
-        // The specification is not fully clear how to form P1/P2.
-        // We'll assume both P1 and P2 go from current pose to destination pose,
-        // but differ slightly. For demonstration, let's just create two slightly
-        // different orientation goals or waypoints. In real scenario, user would define logic.
-        nav2_msgs::action::ComputePathToPose::Goal CreateComputePathGoal(const geometry_msgs::msg::PoseStamped &start,
-                                                                         const geometry_msgs::msg::PoseStamped &goal);
 
         // After receiving both paths, decide which is shorter and send final nav_to_pose
         void DecideAndSendFinalGoal();
+        // pc processing activation
+        rclcpp::Subscription<std_msgs::msg::String>::SharedPtr pc_processing_sub_;
+        void pointCloudActivationCallback(const std_msgs::msg::String::ConstSharedPtr &msg);
     };
 
-} // namespace custom_nav2_action_client
+}
 
 #endif

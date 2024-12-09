@@ -133,7 +133,7 @@ def generate_launch_description():
 
     nav2_client_node = Node(
         package='planner_module',
-        executable='nav2_client2',
+        executable='nav2_client3',
         parameters=[{'robot_description': robot_description}],
         output='screen'
     )
@@ -142,8 +142,14 @@ def generate_launch_description():
         period=7.0,
         actions=[arm_controller_node]
     )
-
-
+    delayed_nav2 = TimerAction(
+        period=8.0,
+        actions=[nav2_client_node]
+    )
+    delayed_pc = TimerAction(
+        period=9.0,
+        actions=[pc_processing_node]
+    )
 
     return LaunchDescription([
         gazebo_launch,
@@ -152,7 +158,8 @@ def generate_launch_description():
         load_joint_state_broadcaster,
         load_joint_trajectory_controller,
         static_transform_publisher_node,
-        # pc_processing_node,
         delayed_arm_controller,
+        delayed_nav2,
+        delayed_pc,
         rviz_node
     ])

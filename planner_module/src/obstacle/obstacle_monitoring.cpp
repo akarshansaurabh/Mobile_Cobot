@@ -524,7 +524,7 @@ namespace obstacle_monitoring
         geometry_msgs::msg::TransformStamped transform_stamped;
         try
         {
-            transform_stamped = tf_buffer_->lookupTransform(global_frame_, robot_base_frame_, tf2::TimePointZero);
+            transform_stamped = tf_buffer_->lookupTransform(global_frame_, robot_base_frame_, tf2::TimePointZero, tf2::durationFromSec(0.1));
         }
         catch (tf2::TransformException &ex)
         {

@@ -1,4 +1,8 @@
 #include "planner_module/waypoint_gen.hpp"
+#include <iostream>
+#include <eigen3/Eigen/Dense>
+
+using namespace std;
 
 namespace waypointGen
 {
@@ -57,16 +61,12 @@ namespace waypointGen
         }
 
         // Now [left, right] is a small range (at most 3 elements)
-        // Refine by checking segments within this range precisely
         auto [finalDist, finalIdx] = refineMinDistanceInRange(p, left, right);
         return {finalDist, finalIdx};
     }
 
     std::tuple<double, int> DoorPathAnalyzer::refineMinDistanceInRange(const geometry_msgs::msg::Point &p, int left, int right)
     {
-        // In this small range, we check all segments [i, i+1] and also the waypoints themselves
-        // to find the true minimal distance. The minimal point might be inside a segment.
-
         double minDist = std::numeric_limits<double>::infinity();
         int bestIdx = -1;
 
@@ -76,8 +76,6 @@ namespace waypointGen
             return {d, left};
         }
 
-        // Check line segments between [left ... right]
-        // Also consider that if left==right, no segment, just a single waypoint check
         for (int i = left; i < right; i++)
         {
             double d = distToWaypoint(p, path_[i]);
@@ -90,7 +88,7 @@ namespace waypointGen
         return {minDist, bestIdx};
     }
 
-    std::vector<Door> loadDoorsFromYaml(const std::string &filename)
+    std::vector<Door> DoorPathAnalyzer::loadDoorsFromYaml(const std::string &filename)
     {
         std::vector<waypointGen::Door> doors;
 
@@ -120,7 +118,7 @@ namespace waypointGen
         // populate table_corners
         YAML::Node config = YAML::LoadFile(filename);
         geometry_msgs::msg::PoseStamped pose;
-        pose.header.frame_id = "map";
+
         YAML::Node locations = config["locations"];
         const std::vector<std::string> tableCorners = {"table_A", "table_B", "table_C", "table_D"};
 
@@ -139,12 +137,12 @@ namespace waypointGen
         }
         geometry_msgs::msg::PoseStamped M1, M2;
         // compute P1 and P2
-        P1.pose.position.x = M1.pose.position.x = (table_corners[0].pose.position.x + table_corners[1].pose.position.x) / 2;
-        P1.pose.position.y = M1.pose.position.y = (table_corners[0].pose.position.y + table_corners[1].pose.position.y) / 2;
-        P1.pose.position.z = M1.pose.position.z = (table_corners[0].pose.position.z + table_corners[1].pose.position.z) / 2;
-        P2.pose.position.x = M2.pose.position.x = (table_corners[2].pose.position.x + table_corners[3].pose.position.x) / 2;
-        P2.pose.position.y = M2.pose.position.y = (table_corners[2].pose.position.y + table_corners[3].pose.position.y) / 2;
-        P2.pose.position.z = M2.pose.position.z = (table_corners[2].pose.position.z + table_corners[3].pose.position.z) / 2;
+        P1.pose.position.x = M1.pose.position.x = (table_corners[0].pose.position.x + table_corners[1].pose.position.x) / 2.0;
+        P1.pose.position.y = M1.pose.position.y = (table_corners[0].pose.position.y + table_corners[1].pose.position.y) / 2.0;
+        P1.pose.position.z = M1.pose.position.z = (table_corners[0].pose.position.z + table_corners[1].pose.position.z) / 2.0;
+        P2.pose.position.x = M2.pose.position.x = (table_corners[2].pose.position.x + table_corners[3].pose.position.x) / 2.0;
+        P2.pose.position.y = M2.pose.position.y = (table_corners[2].pose.position.y + table_corners[3].pose.position.y) / 2.0;
+        P2.pose.position.z = M2.pose.position.z = (table_corners[2].pose.position.z + table_corners[3].pose.position.z) / 2.0;
 
         P1.pose.position.x -= dis;
         P2.pose.position.y -= dis;
@@ -158,5 +156,38 @@ namespace waypointGen
         P2.pose.orientation.y = 0.0;
         P2.pose.orientation.z = 0.707;
         P2.pose.orientation.w = 0.707;
+
+        P1.header.frame_id = P2.header.frame_id = "map";
     }
+
+    geometry_msgs::msg::Vector3 TableWayPointGen::ComputeDesiredForwardDistance(const std::vector<geometry_msgs::msg::Point> &table_vertices,
+                                                                                const geometry_msgs::msg::Point &robot_position)
+    {
+        geometry_msgs::msg::Point mid_point;
+        geometry_msgs::msg::Vector3 ans;
+        double min_dis = 10000.0;
+        Eigen::Vector3d dis_vector, direction;
+        for (int i = 0; i < 4; i++)
+        {
+            mid_point.x = (table_vertices[i].x + table_vertices[(i == 3) ? 0 : i + 1].x) / 2.0;
+            mid_point.y = (table_vertices[i].y + table_vertices[(i == 3) ? 0 : i + 1].y) / 2.0;
+            mid_point.z = (table_vertices[i].z + table_vertices[(i == 3) ? 0 : i + 1].z) / 2.0;
+            double dis = distToWaypoint(mid_point, robot_position);
+            if (dis < min_dis)
+            {
+                min_dis = dis;
+                dis_vector << (mid_point.x - robot_position.x),
+                    (mid_point.y - robot_position.y),
+                    (mid_point.z - robot_position.z);
+            }
+        }
+        direction = dis_vector / dis_vector.norm();
+        ans.x = 0.85 * min_dis * direction.x();
+        ans.y = 0.85 * min_dis * direction.y();
+        ans.z = 0.85 * min_dis * direction.z();
+        std::cout << ans.x << " " << ans.y << " " << ans.z << std::endl;
+        return ans;
+    }
+
+    TableWayPointGen::TableWayPointGen() {}
 }

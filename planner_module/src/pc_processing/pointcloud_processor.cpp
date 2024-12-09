@@ -10,15 +10,15 @@ namespace pointcloud_processing
           mean_k_(50),
           std_dev_mul_thresh_(1.0),
           roi_min_x_(0.0f),
-          roi_max_x_(6.0f),
-          roi_min_y_(-4.0f),
-          roi_max_y_(4.0f),
-          roi_min_z_(0.0f),
-          roi_max_z_(2.0f),
-          plane_distance_threshold_(0.01),
+          roi_max_x_(10.0f),
+          roi_min_y_(-10.0f),
+          roi_max_y_(10.0f),
+          roi_min_z_(0.4f),
+          roi_max_z_(1.5),
+          plane_distance_threshold_(0.03),
           min_plane_inliers_(800),
           ransac_success_(false),
-          min_cluster_size_(30),
+          min_cluster_size_(50),
           max_cluster_size_(1000),
           cluster_tolerance_(0.07),
           processing_mode_("stop"),
@@ -36,9 +36,13 @@ namespace pointcloud_processing
         // Publisher for the processed point cloud
         pointcloud_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(
             "/arm_rgbd_camera/points_map", rclcpp::QoS(10));
+        move_amr_pub_ = this->create_publisher<geometry_msgs::msg::Vector3>(
+            "/move_amr_topic", rclcpp::QoS(10));
 
         // Declare parameters
         this->declare_parameter("pc_processing_param", "stop");
+
+        way_point_generator_ = std::make_shared<waypointGen::TableWayPointGen>();
     }
     void PointCloudProcessor::initialize()
     {
@@ -106,7 +110,7 @@ namespace pointcloud_processing
         pcl::fromROSMsg(*msg, *pcl_cloud);
 
         // Preprocess the point cloud
-        preprocessPointCloud(pcl_cloud);
+        preprocessPointCloud(pcl_cloud, false);
 
         // Transform point cloud to target frame
         if (!transformPointCloudToTargetFrame(pcl_cloud, msg->header))
@@ -174,20 +178,39 @@ namespace pointcloud_processing
         }
     }
 
-    void PointCloudProcessor::preprocessPointCloud(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud)
+    void PointCloudProcessor::preprocessPointCloud(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud, bool is_table)
     {
         // Downsample using VoxelGrid filter
         pcl::VoxelGrid<pcl::PointXYZRGB> voxel_filter;
         voxel_filter.setInputCloud(cloud);
         voxel_filter.setLeafSize(voxel_grid_leaf_size_, voxel_grid_leaf_size_, voxel_grid_leaf_size_);
         voxel_filter.filter(*cloud);
-
         // Remove outliers
         pcl::StatisticalOutlierRemoval<pcl::PointXYZRGB> sor_filter;
         sor_filter.setInputCloud(cloud);
         sor_filter.setMeanK(mean_k_);
         sor_filter.setStddevMulThresh(std_dev_mul_thresh_);
         sor_filter.filter(*cloud);
+
+        if (is_table)
+        { // remove undesired cluster
+            std::vector<pcl::PointIndices> cluster_indices;
+            min_cluster_size_ = 1000;
+            max_cluster_size_ = 400000;
+            cluster_tolerance_ = 0.1;
+            extractClusters(cloud, cluster_indices);
+            min_cluster_size_ = 50;
+            max_cluster_size_ = 1000;
+            cluster_tolerance_ = 0.07;
+            std::cout << "number of cluster for detection = " << cluster_indices.size() << std::endl;
+
+            pcl::ExtractIndices<pcl::PointXYZRGB> extract_cluster;
+            pcl::PointIndices::Ptr cluster_indices_ptr(new pcl::PointIndices(cluster_indices[0]));
+            extract_cluster.setInputCloud(cloud);
+            extract_cluster.setIndices(cluster_indices_ptr);
+            extract_cluster.setNegative(false);
+            extract_cluster.filter(*cloud);
+        }
     }
 
     bool PointCloudProcessor::transformPointCloudToTargetFrame(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud, const std_msgs::msg::Header &header)
@@ -244,6 +267,7 @@ namespace pointcloud_processing
 
         Eigen::Vector4f min_point(global_point_min.point.x, global_point_min.point.y, global_point_min.point.z, 1.0f);
         Eigen::Vector4f max_point(global_point_max.point.x, global_point_max.point.y, global_point_max.point.z, 1.0f);
+
         crop_filter.setMin(min_point);
         crop_filter.setMax(max_point);
         crop_filter.filter(*cloud);
@@ -265,7 +289,8 @@ namespace pointcloud_processing
             pcl::PointIndices::Ptr inliers(new pcl::PointIndices);
             seg.setInputCloud(cloud);
             seg.segment(*inliers, *coefficients);
-
+            std::cout << "number of points in plane = " << inliers->indices.size() << std::endl;
+            std::cout << "min_plane_inliers_ = " << min_plane_inliers_ << std::endl;
             if (inliers->indices.size() < static_cast<size_t>(min_plane_inliers_))
                 break;
 
@@ -320,7 +345,7 @@ namespace pointcloud_processing
         if (cluster_cloud->points.size() == 0)
         {
             RCLCPP_WARN(this->get_logger(), "Cluster has no points for plane segmentation.");
-            ransac_success_ = true;
+            // ransac_success_ = true;
             voxel_grid_leaf_size_ /= 2.0;
             min_plane_inliers_ *= 2;
             min_cluster_size_ *= 2;
@@ -344,16 +369,17 @@ namespace pointcloud_processing
             pcl::ModelCoefficients::Ptr coefficients(new pcl::ModelCoefficients);
             pcl::PointIndices::Ptr inliers(new pcl::PointIndices);
             seg.setInputCloud(cluster_cloud);
+            RCLCPP_INFO(this->get_logger(), "RANSAC STARTED.");
             seg.segment(*inliers, *coefficients);
 
             if (inliers->indices.size() < 1)
             {
                 RCLCPP_ERROR(this->get_logger(), "RANSAC FAILED BECAUSE OF LESS POINTS");
-                // num_planes_extracted++;
-                // extract_plane.setInputCloud(cluster_cloud);
-                // extract_plane.setIndices(inliers);
-                // extract_plane.setNegative(true);
-                // extract_plane.filter(*cluster_cloud);
+                voxel_grid_leaf_size_ /= 2.0;
+                min_plane_inliers_ *= 2;
+                min_cluster_size_ *= 2;
+                max_cluster_size_ *= 2;
+                ransac_success_ = false;
                 break;
             }
 
@@ -443,7 +469,7 @@ namespace pointcloud_processing
         pcl::fromROSMsg(*msg, *pcl_cloud);
 
         // Preprocess the point cloud
-        preprocessPointCloud(pcl_cloud);
+        preprocessPointCloud(pcl_cloud, true);
 
         // Transform point cloud to target frame
         if (!transformPointCloudToTargetFrame(pcl_cloud, msg->header))
@@ -466,12 +492,33 @@ namespace pointcloud_processing
         {
             RCLCPP_INFO(this->get_logger(), "Table detected.");
             vis_manager_->publishTableVertices(table_vertices);
+            // compute the distance and send it to client
+            if (table_detection_counter_ == 1)
+            {
+                geometry_msgs::msg::Point robot_position;
+                geometry_msgs::msg::TransformStamped transform_stamped;
+                try
+                {
+                    transform_stamped =
+                        tf_buffer_->lookupTransform(target_frame_, base_frame_, tf2::TimePointZero, tf2::durationFromSec(0.1));
+                }
+                catch (tf2::TransformException &ex)
+                {
+                    RCLCPP_WARN(this->get_logger(), "Transform error: %s", ex.what());
+                    return;
+                }
+                robot_position.x = transform_stamped.transform.translation.x;
+                robot_position.y = transform_stamped.transform.translation.y;
+                robot_position.z = transform_stamped.transform.translation.z;
+                geometry_msgs::msg::Vector3 msg_ = way_point_generator_->ComputeDesiredForwardDistance(table_vertices, robot_position);
+                move_amr_pub_->publish(msg_);
+            }
         }
         else
             RCLCPP_WARN(this->get_logger(), "Table not found.");
 
         // Reset the subscriber after processing
-        if (table_detection_counter_ == 2)
+        if (table_detection_counter_ == 1)
             table_detection_sub_.reset();
     }
 

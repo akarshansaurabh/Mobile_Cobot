@@ -5,6 +5,7 @@
 #include <yaml-cpp/yaml.h>
 
 using namespace std::chrono_literals;
+using namespace std;
 
 namespace custom_nav2_action_client2
 {
@@ -12,9 +13,7 @@ namespace custom_nav2_action_client2
     /** Nav2ActionClientBase Implementation **/
 
     Nav2ActionClientBase::Nav2ActionClientBase(rclcpp::Node::SharedPtr node)
-        : node_(node)
-    {
-    }
+        : node_(node) {}
 
     /** NavigateToPoseClient Implementation **/
 
@@ -22,6 +21,29 @@ namespace custom_nav2_action_client2
         : Nav2ActionClientBase(node), goal_active_(false)
     {
         action_client_ = rclcpp_action::create_client<ActionType>(node_, "/navigate_to_pose");
+        move_amr_sub_ = node_->create_subscription<geometry_msgs::msg::Vector3>(
+            "/move_amr_topic", rclcpp::QoS(10),
+            std::bind(&NavigateToPoseClient::MoveAMRCallBack, this, std::placeholders::_1));
+    }
+
+    // amr approaches the table
+    void NavigateToPoseClient::MoveAMRCallBack(const geometry_msgs::msg::Vector3::ConstSharedPtr &msg)
+    {
+        ActionType::Goal next_goal;
+        next_goal.pose.header.frame_id = "map";
+        next_goal.pose.header.stamp = node_->now();
+        next_goal.pose.pose.position.x = nav_to_pose_actual_pose_.pose.position.x + msg->x;
+        next_goal.pose.pose.position.y = nav_to_pose_actual_pose_.pose.position.y + msg->y;
+        next_goal.pose.pose.position.z = nav_to_pose_actual_pose_.pose.position.z + msg->z;
+        next_goal.pose.pose.orientation = nav_to_pose_desired_pose_.pose.pose.orientation;
+        is_table_destination_ = false;
+        SendGoal(next_goal);
+        // also run a parallel thread for the arm motion planner
+    }
+
+    void NavigateToPoseClient::initialize()
+    {
+        amr_correction_ = std::make_shared<planner_correction::AMRCorrection>(node_);
     }
 
     void NavigateToPoseClient::SendGoal(const ActionType::Goal &goal_msg)
@@ -32,12 +54,22 @@ namespace custom_nav2_action_client2
             return;
         }
 
+        nav_to_pose_desired_pose_ = goal_msg;
+
         auto goal_options = rclcpp_action::Client<ActionType>::SendGoalOptions();
         goal_options.goal_response_callback = std::bind(&NavigateToPoseClient::GoalResponseCallback, this, std::placeholders::_1);
         goal_options.feedback_callback = std::bind(&NavigateToPoseClient::FeedbackCallback, this, std::placeholders::_1, std::placeholders::_2);
         goal_options.result_callback = std::bind(&NavigateToPoseClient::ResultCallback, this, std::placeholders::_1);
 
         action_client_->async_send_goal(goal_msg, goal_options);
+
+        geometry_msgs::msg::PoseStamped pose = goal_msg.pose;
+
+        tf2::Quaternion tf_quat;
+        tf2::fromMsg(pose.pose.orientation, tf_quat);
+        double roll, pitch;
+        tf2::Matrix3x3(tf_quat).getRPY(roll, pitch, desired_yaw);
+        amr_correction_->desired_yaw_ = desired_yaw;
     }
 
     void NavigateToPoseClient::CancelGoal()
@@ -69,7 +101,26 @@ namespace custom_nav2_action_client2
                                                 const std::shared_ptr<const ActionType::Feedback> feedback)
     {
         (void)goal_handle;
-        RCLCPP_INFO(node_->get_logger(), "Distance remaining: %f", feedback->distance_remaining);
+        // std::cout << " feedback->distance_remaining " << feedback->distance_remaining << std::endl;
+
+        if (feedback->distance_remaining < 0.3 && feedback->distance_remaining > 0.01)
+        {
+            // std::cout << " feedback->distance_remaining " << feedback->distance_remaining << std::endl;
+            nav_to_pose_actual_pose_.pose.position.x = feedback->current_pose.pose.position.x;
+            nav_to_pose_actual_pose_.pose.position.y = feedback->current_pose.pose.position.y;
+            nav_to_pose_actual_pose_.pose.position.z = feedback->current_pose.pose.position.z;
+            nav_to_pose_actual_pose_.pose.orientation.x = feedback->current_pose.pose.orientation.x;
+            nav_to_pose_actual_pose_.pose.orientation.y = feedback->current_pose.pose.orientation.y;
+            nav_to_pose_actual_pose_.pose.orientation.z = feedback->current_pose.pose.orientation.z;
+            nav_to_pose_actual_pose_.pose.orientation.w = feedback->current_pose.pose.orientation.w;
+            if (amr_correction_ && !amr_correction_->odometry_check_sub_)
+            {
+                std::cout << "subs activate" << std::endl;
+                amr_correction_->odometry_check_sub_ = node_->create_subscription<nav_msgs::msg::Odometry>(
+                    "/odom", rclcpp::QoS(10),
+                    std::bind(&planner_correction::AMRCorrection::OdometryCheckCallback, amr_correction_.get(), std::placeholders::_1));
+            }
+        }
     }
 
     void NavigateToPoseClient::ResultCallback(const GoalHandle::WrappedResult &result)
@@ -78,6 +129,11 @@ namespace custom_nav2_action_client2
         {
         case rclcpp_action::ResultCode::SUCCEEDED:
             RCLCPP_INFO(node_->get_logger(), "Goal succeeded.");
+            amr_correction_->actual_pose_stamped.pose = nav_to_pose_actual_pose_.pose;
+            amr_correction_->actual_pose_stamped.header.frame_id = "map";
+            amr_correction_->actual_pose_stamped.header.stamp = node_->now();
+            amr_correction_->desired_pose_stamped.pose.orientation = nav_to_pose_desired_pose_.pose.pose.orientation;
+            amr_correction_->CorrectOrientation(is_table_destination_);
             break;
         case rclcpp_action::ResultCode::ABORTED:
             RCLCPP_ERROR(node_->get_logger(), "Goal was aborted.");
@@ -94,14 +150,14 @@ namespace custom_nav2_action_client2
     /** ComputePathToPoseClient Implementation **/
 
     ComputePathToPoseClient::ComputePathToPoseClient(rclcpp::Node::SharedPtr node)
-        : Nav2ActionClientBase(node), goal_active_(false), next_goal_is_p1_(false), utilities_(nullptr)
+        : Nav2ActionClientBase(node), goal_active_(false), current_goal_is_p1_(false), utilities_(nullptr)
     {
         action_client_ = rclcpp_action::create_client<ActionType>(node_, "/compute_path_to_pose");
     }
 
     void ComputePathToPoseClient::SendGoal(const ActionType::Goal &goal_msg, bool is_p1)
     {
-        next_goal_is_p1_ = is_p1;
+        current_goal_is_p1_ = is_p1;
 
         if (!action_client_->wait_for_action_server(10s))
         {
@@ -113,7 +169,6 @@ namespace custom_nav2_action_client2
         goal_options.goal_response_callback = std::bind(&ComputePathToPoseClient::GoalResponseCallback, this, std::placeholders::_1);
         goal_options.feedback_callback = std::bind(&ComputePathToPoseClient::FeedbackCallback, this, std::placeholders::_1, std::placeholders::_2);
         goal_options.result_callback = std::bind(&ComputePathToPoseClient::ResultCallback, this, std::placeholders::_1);
-
         action_client_->async_send_goal(goal_msg, goal_options);
     }
 
@@ -133,11 +188,11 @@ namespace custom_nav2_action_client2
     {
         if (!goal_handle)
         {
-            RCLCPP_ERROR(node_->get_logger(), "Goal was rejected by the server.");
+            RCLCPP_ERROR(node_->get_logger(), "ComputePathToPoseClient Goal was rejected by the server.");
         }
         else
         {
-            RCLCPP_INFO(node_->get_logger(), "Goal accepted by the server.");
+            RCLCPP_INFO(node_->get_logger(), "ComputePathToPoseClient Goal accepted by the server.");
             goal_handle_ = goal_handle;
         }
     }
@@ -157,10 +212,7 @@ namespace custom_nav2_action_client2
         case rclcpp_action::ResultCode::SUCCEEDED:
             RCLCPP_INFO(node_->get_logger(), "Received path from planner.");
             if (utilities_)
-            {
-                // Call back to utilities with the computed path
-                utilities_->OnPathComputed(result.result->path, next_goal_is_p1_);
-            }
+                utilities_->OnPathComputed(result.result->path, current_goal_is_p1_); // 1st time true, 2nd time false
             break;
         case rclcpp_action::ResultCode::ABORTED:
             RCLCPP_ERROR(node_->get_logger(), "Goal was aborted.");
@@ -263,15 +315,15 @@ namespace custom_nav2_action_client2
                                                                                 nav_to_poses(waypoint_client),
                                                                                 waiting_for_paths_(false),
                                                                                 p1_received_(false),
-                                                                                p2_received_(false),
-                                                                                is_table_destination_(false)
+                                                                                p2_received_(false)
     {
         // Initialize publishers
         initial_pose_pub_ = node_->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>("/initialpose", 10);
         path_publisher_ = node_->create_publisher<nav_msgs::msg::Path>("/global_path", 10);
+        nav_to_pose.is_table_destination_ = false;
 
         // Set default destination
-        default_destination_ = "door_B";
+        default_destination_ = "home";
         node_->declare_parameter<std::string>("destination", default_destination_);
 
         geometry_msgs::msg::PoseWithCovarianceStamped initial_pose;
@@ -304,6 +356,13 @@ namespace custom_nav2_action_client2
 
         // Set utilities pointer in path_to_pose so we can get callbacks
         path_to_pose.SetUtilities(this);
+
+        std::string config_file = "/home/akarshan/mobile_cobot_ws/src/r1d1_description/config/locations.yaml";
+        table_analyser = std::make_unique<waypointGen::TablePathAnalyzer>(config_file, 1.0);
+
+        pc_processing_sub_ = node_->create_subscription<std_msgs::msg::String>(
+            "/activate_pc_processing", rclcpp::QoS(10),
+            std::bind(&Nav2Utilities::pointCloudActivationCallback, this, std::placeholders::_1));
     }
 
     void Nav2Utilities::ActivateCostmapParameters(bool activate)
@@ -442,6 +501,12 @@ namespace custom_nav2_action_client2
             .detach();
     }
 
+    void Nav2Utilities::pointCloudActivationCallback(const std_msgs::msg::String::ConstSharedPtr &msg)
+    {
+        // std::string str = msg->data;
+        ActivatePCProcessingParameters(msg->data);
+    }
+
     void Nav2Utilities::SetInitialPose(const geometry_msgs::msg::PoseWithCovarianceStamped &initial_pose)
     {
         RCLCPP_INFO(node_->get_logger(), "Setting initial pose");
@@ -526,7 +591,6 @@ namespace custom_nav2_action_client2
         rcl_interfaces::msg::SetParametersResult result;
         result.successful = true;
         result.reason = "Parameters set successfully.";
-        std::cout << "nav2 param callback called" << std::endl;
 
         for (const auto &param : parameters)
         {
@@ -559,43 +623,24 @@ namespace custom_nav2_action_client2
         destination_goal_.pose.header.stamp = node_->now();
 
         // Determine if destination is door/home or table
-        // Doors and home: {door_A, door_B, door_C, door_D, door_E, home}
-        // Tables: {table_A, table_B, table_C, table_D}
         std::vector<std::string> doors_or_home = {"door_A", "door_B", "door_C", "door_D", "door_E", "home"};
         std::vector<std::string> tables = {"table_A", "table_B", "table_C", "table_D"};
 
         if (std::find(doors_or_home.begin(), doors_or_home.end(), destination_) != doors_or_home.end())
         {
-            // Just send the goal to nav_to_pose
-            is_table_destination_ = false;
+            nav_to_pose.is_table_destination_ = false;
             nav_to_pose.SendGoal(destination_goal_);
         }
         else if (std::find(tables.begin(), tables.end(), destination_) != tables.end())
         {
-            // Table scenario:
             // 1) Get current pose
-            is_table_destination_ = true;
+            nav_to_pose.is_table_destination_ = true;
             current_pose_ = GetCurrentPose();
 
             // 2) We want to send two goals P1 and P2 to compute_path_to_pose
-            // For demonstration, let's assume P1 is just a direct path to destination, and
-            // P2 is also direct but we imagine a slight orientation difference for testing.
-            //
-            // In a real scenario, you'd have logic to produce different goals. Here we produce two distinct goals:
-            // P1: current_pose -> destination_goal_.pose
-            // P2: current_pose -> destination_goal_.pose (maybe rotate orientation by some factor)
-            // We'll just use the same position but different orientation for P2 for demonstration.
-
+            table_analyser->P1.header.stamp = node_->now();
             geometry_msgs::msg::PoseStamped p1_start = current_pose_;
-            geometry_msgs::msg::PoseStamped p1_goal = destination_goal_.pose;
-
-            geometry_msgs::msg::PoseStamped p2_start = current_pose_;
-            geometry_msgs::msg::PoseStamped p2_goal = destination_goal_.pose;
-            // Slight modification in orientation for P2 to differentiate:
-            p2_goal.pose.orientation.z += 0.01; // Just a tiny tweak for demonstration
-            if (p2_goal.pose.orientation.z > 1.0)
-                p2_goal.pose.orientation.z = 1.0;
-
+            geometry_msgs::msg::PoseStamped p1_goal = table_analyser->P1;
             // We'll store them so that after we get both paths we can decide.
             p1_received_ = false;
             p2_received_ = false;
@@ -618,27 +663,23 @@ namespace custom_nav2_action_client2
         return result;
     }
 
+    // after completion of 1st goal, send 2nd goal. after completion of 2nd goal, stop
     void Nav2Utilities::OnPathComputed(const nav_msgs::msg::Path &path, bool is_p1)
     {
         // This is called after a ComputePathToPose result is received
         if (!waiting_for_paths_)
-        {
-            // Not expecting paths, ignore
             return;
-        }
 
-        if (is_p1)
+        if (is_p1) // 1st time
         {
             p1_path_ = path;
             p1_received_ = true;
             RCLCPP_INFO(node_->get_logger(), "P1 path received. Length: %zu", p1_path_.poses.size());
 
             // Now send P2 goal
+            table_analyser->P2.header.stamp = node_->now();
             geometry_msgs::msg::PoseStamped p2_start = current_pose_;
-            geometry_msgs::msg::PoseStamped p2_goal = destination_goal_.pose;
-            p2_goal.pose.orientation.z += 0.01; // same tweak as above
-            if (p2_goal.pose.orientation.z > 1.0)
-                p2_goal.pose.orientation.z = 1.0;
+            geometry_msgs::msg::PoseStamped p2_goal = table_analyser->P2;
 
             nav2_msgs::action::ComputePathToPose::Goal p2_compute_goal;
             p2_compute_goal.goal = p2_goal;
@@ -646,12 +687,11 @@ namespace custom_nav2_action_client2
             p2_compute_goal.use_start = true;
             path_to_pose.SendGoal(p2_compute_goal, false); // This is P2
         }
-        else
+        else // 2nd time
         {
             p2_path_ = path;
             p2_received_ = true;
             RCLCPP_INFO(node_->get_logger(), "P2 path received. Length: %zu", p2_path_.poses.size());
-
             // Now we have both P1 and P2
             DecideAndSendFinalGoal();
         }
@@ -660,7 +700,6 @@ namespace custom_nav2_action_client2
     void Nav2Utilities::DecideAndSendFinalGoal()
     {
         waiting_for_paths_ = false;
-
         // Compare lengths of p1_path_ and p2_path_
         double p1_length = 0.0;
         for (size_t i = 0; i + 1 < p1_path_.poses.size(); i++)
@@ -682,23 +721,21 @@ namespace custom_nav2_action_client2
 
         RCLCPP_INFO(node_->get_logger(), "P1 length: %f, P2 length: %f", p1_length, p2_length);
 
-        // If P1 is shorter, send P1 as final goal, else P2
-        // P1 and P2 differ only slightly. We must reconstruct the final navigate_to_pose goal.
-        // We'll just use the same final destination_goal_ because P1 and P2 differ only in approach.
-        // In a real scenario, you would store P1/P2 final poses.
-
         if (p1_length < p2_length)
         {
             RCLCPP_INFO(node_->get_logger(), "P1 is shorter. Sending P1 as navigate_to_pose goal.");
-            nav_to_pose.SendGoal(destination_goal_);
+            // generate multiple waypoints till P1
+            nav2_msgs::action::NavigateToPose::Goal goal_p1;
+            goal_p1.pose = table_analyser->P1;
+            nav_to_pose.SendGoal(goal_p1);
         }
         else
         {
             RCLCPP_INFO(node_->get_logger(), "P2 is shorter or equal. Sending P2 as navigate_to_pose goal.");
-            // In a real scenario, we might have stored a slightly different final pose for P2.
-            // Here we just reuse destination_goal_ for demonstration.
-            nav_to_pose.SendGoal(destination_goal_);
+            // generate multiple waypoints till P2
+            nav2_msgs::action::NavigateToPose::Goal goal_p2;
+            goal_p2.pose = table_analyser->P2;
+            nav_to_pose.SendGoal(goal_p2);
         }
     }
-
-} // namespace custom_nav2_action_client
+}

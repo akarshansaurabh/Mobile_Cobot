@@ -26,11 +26,14 @@
 #include <pcl/common/transforms.h>
 
 #include <Eigen/Dense>
+#include <geometry_msgs/msg/pose_stamped.hpp>
 
 #include "visualizations/visualization_manager.hpp"
 
 #include <iostream>
 #include <memory>
+#include "planner_module/waypoint_gen.hpp"
+
 using namespace std;
 
 namespace pointcloud_processing
@@ -48,7 +51,7 @@ namespace pointcloud_processing
         void pointCloudTableDetectionCallback(const sensor_msgs::msg::PointCloud2::ConstSharedPtr &msg);
 
         // Processing functions
-        void preprocessPointCloud(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud);
+        void preprocessPointCloud(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud, bool is_table);
         bool transformPointCloudToTargetFrame(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud, const std_msgs::msg::Header &header);
         void filterPointCloudInROI(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud, const std_msgs::msg::Header &header);
         void removePlanes(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud);
@@ -66,6 +69,7 @@ namespace pointcloud_processing
         rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr pointcloud_sub_;
         rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr table_detection_sub_;
         rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pointcloud_pub_;
+        rclcpp::Publisher<geometry_msgs::msg::Vector3>::SharedPtr move_amr_pub_;
 
         // TF2 buffer and listener
         std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
@@ -99,7 +103,8 @@ namespace pointcloud_processing
         int box_detection_counter_, table_detection_counter_;
 
         std::shared_ptr<visualization::VisualizationManager> vis_manager_;
+        std::shared_ptr<waypointGen::TableWayPointGen> way_point_generator_;
     };
-} // namespace pointcloud_processing
+} 
 
-#endif // POINTCLOUD_PROCESSOR_HPP
+#endif 

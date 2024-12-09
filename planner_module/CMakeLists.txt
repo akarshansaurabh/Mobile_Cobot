@@ -43,64 +43,29 @@ include_directories(include
 link_directories(${PCL_LIBRARY_DIR})
 add_definitions(${PCL_DEFINITIONS})
 
-add_executable(nav2_client src/navigation/nav2_client.cpp
-               src/main/nav2_main.cpp)
-ament_target_dependencies(nav2_client
+
+add_executable(nav2_client3 src/navigation/nav2_client3.cpp src/planner_module/planner_correction.cpp
+              src/planner_module/waypoint_gen.cpp src/main/nav2_main3.cpp)
+ament_target_dependencies(nav2_client3
   rclcpp
   tf2_ros
   yaml-cpp
-  nav_msgs
-  nav2_msgs
-  geometry_msgs
-  rclcpp_action
-  trajectory_msgs
-  builtin_interfaces
-)
-target_link_libraries(nav2_client
-  yaml-cpp
-)
-
-add_executable(nav2_client2 src/navigation/nav2_client2.cpp
-               src/main/nav2_main2.cpp)
-ament_target_dependencies(nav2_client2
-  rclcpp
-  tf2_ros
-  yaml-cpp
-  nav_msgs
-  nav2_msgs
-  geometry_msgs
-  rclcpp_action
-  trajectory_msgs
-  builtin_interfaces
-)
-target_link_libraries(nav2_client2
-  yaml-cpp
-)
-
-
-add_executable(pc_processing2 src/pc_processing/pc_processing_2.cpp
-               src/main/pc_processing_main2.cpp)
-ament_target_dependencies(pc_processing2
-  rclcpp
-  tf2_ros
   tf2_eigen
-  sensor_msgs
+  nav_msgs
+  nav2_msgs
   geometry_msgs
   rclcpp_action
+  trajectory_msgs
   builtin_interfaces
-  pcl_conversions
-  pcl_ros
-  tf2_sensor_msgs
-  tf2
-  std_msgs
   tf2_geometry_msgs
-  visualization_msgs
+  tf2_sensor_msgs
 )
-target_link_libraries(pc_processing2
- ${PCL_LIBRARIES}
+target_link_libraries(nav2_client3
+  yaml-cpp
 )
 
-add_executable(pc_processing1 src/pc_processing/pointcloud_processor.cpp
+
+add_executable(pc_processing1 src/pc_processing/pointcloud_processor.cpp src/planner_module/waypoint_gen.cpp
                src/main/pc_processing_main1.cpp src/visualizations/visualization_manager.cpp)
 ament_target_dependencies(pc_processing1
   rclcpp
@@ -114,12 +79,14 @@ ament_target_dependencies(pc_processing1
   pcl_ros
   tf2_sensor_msgs
   tf2
+  yaml-cpp
   std_msgs
   tf2_geometry_msgs
   visualization_msgs
 )
 target_link_libraries(pc_processing1
  ${PCL_LIBRARIES}
+ yaml-cpp
 )
 
 
@@ -159,10 +126,8 @@ ament_target_dependencies(obstacle_monitoring
 
 install(TARGETS
   pc_processing1
-  pc_processing2
   arm_client
-  nav2_client
-  nav2_client2
+  nav2_client3
   obstacle_monitoring
   DESTINATION lib/${PROJECT_NAME}
 )
