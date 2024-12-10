@@ -2,31 +2,6 @@
 
 int main(int argc, char **argv)
 {
-    // rclcpp::init(argc, argv);
-
-    // auto node = std::make_shared<rclcpp::Node>("nav2_client3_node");
-
-    // // Instantiate NavigateToPose action client
-    // custom_nav2_action_client2::NavigateToPoseClient navigate_to_pose_client(node);
-    // custom_nav2_action_client2::ComputePathToPoseClient path_to_pose_client(node);
-    // custom_nav2_action_client2::NavigateThroughPosesClient navigate_to_poses_client(node);
-    // navigate_to_pose_client.initialize();
-    // // Instantiate utilities
-    // custom_nav2_action_client2::Nav2Utilities nav2_utils(node, navigate_to_pose_client,
-    //                                                     path_to_pose_client, navigate_to_poses_client);
-
-    // std::thread spinner([node]()
-    //                     { rclcpp::spin(node); });
-
-    // std::this_thread::sleep_for(std::chrono::milliseconds(100));
-
-    // nav2_utils.SetNav2Parameters();
-    // std::this_thread::sleep_for(std::chrono::milliseconds(100));
-
-    // spinner.join();
-    // rclcpp::shutdown();
-    // return 0;
-
     rclcpp::init(argc, argv);
     auto node = std::make_shared<rclcpp::Node>("nav2_client3_node");
 

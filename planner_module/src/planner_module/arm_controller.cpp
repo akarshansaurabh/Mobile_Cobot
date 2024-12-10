@@ -106,6 +106,11 @@ namespace arm_planner
         {
         case rclcpp_action::ResultCode::SUCCEEDED:
             RCLCPP_INFO(this->get_logger(), "Joint Trajectory Goal succeeded");
+            /*
+            if octomap geretation is on, then send the remaining view points to server one by one after the completion of the previous view point trajectory
+            Kepp sending untill the last view point is sent. Once the last view point trajectory execution is finished, then stop sending the point
+            
+            */
             break;
         case rclcpp_action::ResultCode::CANCELED:
             RCLCPP_INFO(this->get_logger(), "Joint Trajectory Goal was canceled");
@@ -178,7 +183,6 @@ namespace arm_planner
 
     rcl_interfaces::msg::SetParametersResult ArmController::ArmGoalUpdatedCallback(const std::vector<rclcpp::Parameter> &parameters)
     {
-        bool arm_goal_changed = false;
         rcl_interfaces::msg::SetParametersResult result;
 
         for (const auto &param : parameters)
@@ -188,7 +192,6 @@ namespace arm_planner
                 if (param.get_type() == rclcpp::ParameterType::PARAMETER_STRING)
                 {
                     arm_goal_pose_name_ = param.as_string();
-                    arm_goal_changed = true;
                     RCLCPP_INFO(this->get_logger(), "Destination parameter updated to: '%s'", arm_goal_pose_name_.c_str());
                 }
                 else
