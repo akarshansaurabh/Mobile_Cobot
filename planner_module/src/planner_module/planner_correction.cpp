@@ -2,8 +2,8 @@
 
 namespace planner_correction
 {
-    AMRCorrection::AMRCorrection(rclcpp::Node::SharedPtr node)
-        : node_(node)
+    AMRCorrection::AMRCorrection(rclcpp::Node::SharedPtr node, std::shared_ptr<DetectionTracker> detection_tracker__)
+        : node_(node), detection_tracker_(detection_tracker__)
     {
         tf_buffer_ = std::make_shared<tf2_ros::Buffer>(node_->get_clock());
         tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
@@ -43,8 +43,6 @@ namespace planner_correction
         tf2::Matrix3x3(tf_quat).getRPY(roll, pitch, actual_yaw);
 
         double angle_difference = desired_yaw_ - actual_yaw;
-        std::cout << "angle_difference " << angle_difference << std::endl;
-
         // Normalize angle -> principle value (-pi to +pi)
         while (angle_difference > M_PI)
             angle_difference -= 2 * M_PI;
@@ -57,7 +55,6 @@ namespace planner_correction
             std::cout << "anti" << std::endl;
         else
             std::cout << "clockwise" << std::endl;
-        // std::this_thread::sleep_for(std::chrono::milliseconds(5000));
 
         rclcpp::Rate rate(10);
         std::cout << "correction started!" << std::endl;
@@ -72,27 +69,39 @@ namespace planner_correction
                 {
                     geometry_msgs::msg::Twist cmd_vel_;
                     cmd_vel_.angular.z = 0.0;
-                    std::cout << "correction completed!" << std::endl;
                     std::cout << "stopping" << std::endl;
                     for (int i = 0; i < 200; i++)
                     {
                         cmd_vel_pub_->publish(cmd_vel_);
                         std::this_thread::sleep_for(std::chrono::milliseconds(5));
                     }
-                    std_msgs::msg::String table_detection;
+                    std_msgs::msg::String detection;
                     if (publish_data)
                     {
-                        table_detection.data = "detect_table";
+                        detection.data = "detect_table";
                         std::cout << "table detection!" << std::endl;
-                        pc_processing_pub_->publish(table_detection);
+                        pc_processing_pub_->publish(detection);
+                        /*
+                        in this case, after table is detected, displacement vec is computed
+                        perception sends a msg to nav2 client which then send another goal and make publish_data = false
+                        */
                     }
                     else
                     {
-                        std::cout << "boxes 6d pose estimation!" << std::endl;
-                        table_detection.data = "detect_boxes";
-                        pc_processing_pub_->publish(table_detection);
+                        // perception does not send any data to nav2 client
+                        if (*detection_tracker_ == DetectionTracker::DETECT_BOXES)
+                        {
+                            std::cout << "boxes 6d pose estimation!" << std::endl;
+                            detection.data = "detect_boxes";
+                            *detection_tracker_ == DetectionTracker::DETECT_NOTHING;
+                        }
+                        else if (*detection_tracker_ == DetectionTracker::DETECT_NOTHING)
+                        {
+                            std::cout << "do nothing!" << std::endl;
+                            detection.data = "ignore";
+                        }
+                        pc_processing_pub_->publish(detection);
                     }
-
                     correction_timer_.reset();
                 }
             });

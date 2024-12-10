@@ -17,13 +17,16 @@ namespace custom_nav2_action_client2
 
     /** NavigateToPoseClient Implementation **/
 
-    NavigateToPoseClient::NavigateToPoseClient(rclcpp::Node::SharedPtr node)
-        : Nav2ActionClientBase(node), goal_active_(false)
+    NavigateToPoseClient::NavigateToPoseClient(rclcpp::Node::SharedPtr node,
+                                               std::shared_ptr<planner_correction::DetectionTracker> detection_tracker__)
+        : Nav2ActionClientBase(node), goal_active_(false), detection_tracker_(detection_tracker__)
     {
         action_client_ = rclcpp_action::create_client<ActionType>(node_, "/navigate_to_pose");
         move_amr_sub_ = node_->create_subscription<geometry_msgs::msg::Vector3>(
             "/move_amr_topic", rclcpp::QoS(10),
             std::bind(&NavigateToPoseClient::MoveAMRCallBack, this, std::placeholders::_1));
+
+        *detection_tracker_ = planner_correction::DetectionTracker::DETECT_NOTHING;
     }
 
     // amr approaches the table
@@ -43,7 +46,7 @@ namespace custom_nav2_action_client2
 
     void NavigateToPoseClient::initialize()
     {
-        amr_correction_ = std::make_shared<planner_correction::AMRCorrection>(node_);
+        amr_correction_ = std::make_shared<planner_correction::AMRCorrection>(node_, detection_tracker_);
     }
 
     void NavigateToPoseClient::SendGoal(const ActionType::Goal &goal_msg)
@@ -133,6 +136,13 @@ namespace custom_nav2_action_client2
             amr_correction_->actual_pose_stamped.header.frame_id = "map";
             amr_correction_->actual_pose_stamped.header.stamp = node_->now();
             amr_correction_->desired_pose_stamped.pose.orientation = nav_to_pose_desired_pose_.pose.pose.orientation;
+            if (is_table_destination_)
+                *detection_tracker_ = planner_correction::DetectionTracker::DETECT_TABLE;
+            else
+            {
+                if (*detection_tracker_ == planner_correction::DetectionTracker::DETECT_TABLE)
+                    *detection_tracker_ = planner_correction::DetectionTracker::DETECT_BOXES;
+            }
             amr_correction_->CorrectOrientation(is_table_destination_);
             break;
         case rclcpp_action::ResultCode::ABORTED:

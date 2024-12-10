@@ -36,32 +36,35 @@
    Thread-safety:
    - A mutex protects accumulated_cloud_.
 */
-
-class PointCloudStitcherMethod2
+namespace octoMapGenerator
 {
-public:
-    PointCloudStitcherMethod2(rclcpp::Node::SharedPtr node, const std::string &map_frame);
 
-    pcl::PointCloud<pcl::PointXYZRGB>::Ptr transformCloudToMap(const sensor_msgs::msg::PointCloud2 &msg);
-    void addCloudSnapshot(const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &snapshot);
-    void finalizeStitching(float leaf_size = 0.015f);
-    pcl::PointCloud<pcl::PointXYZRGB>::Ptr getStitchedCloud();
+    class PointCloudStitcherMethod2
+    {
+    public:
+        PointCloudStitcherMethod2(rclcpp::Node::SharedPtr node, const std::string &map_frame);
 
-private:
-    rclcpp::Node::SharedPtr node_;
+        pcl::PointCloud<pcl::PointXYZRGB>::Ptr transformCloudToMap(const sensor_msgs::msg::PointCloud2 &msg);
+        void addCloudSnapshot(const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &snapshot);
+        void finalizeStitching(float leaf_size = 0.015f);
+        pcl::PointCloud<pcl::PointXYZRGB>::Ptr getStitchedCloud();
 
-    std::string map_frame_;
-    std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
-    std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
-    geometry_msgs::msg::TransformStamped map_to_camera_transform;
+    private:
+        rclcpp::Node::SharedPtr node_;
 
-    pcl::PointCloud<pcl::PointXYZRGB>::Ptr accumulated_cloud_;
-    rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr pointcloud_sub_;
+        std::string map_frame_;
+        std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
+        std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
+        geometry_msgs::msg::TransformStamped map_to_camera_transform;
 
-    std::mutex cloud_mutex_;
+        pcl::PointCloud<pcl::PointXYZRGB>::Ptr accumulated_cloud_;
+        rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr pointcloud_sub_;
 
-    static Eigen::Affine3d poseToEigen(const geometry_msgs::msg::Transform &transform);
-    void pointCloudSnapShotCallback(const sensor_msgs::msg::PointCloud2::ConstSharedPtr &snapshot_msg);
-};
+        std::mutex cloud_mutex_;
+
+        static Eigen::Affine3d poseToEigen(const geometry_msgs::msg::Transform &transform);
+        void pointCloudSnapShotCallback(const sensor_msgs::msg::PointCloud2::ConstSharedPtr &snapshot_msg);
+    };
+}
 
 #endif

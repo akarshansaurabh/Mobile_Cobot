@@ -4,9 +4,9 @@ int main(int argc, char **argv)
 {
     rclcpp::init(argc, argv);
     auto node = std::make_shared<rclcpp::Node>("nav2_client3_node");
-
+    auto pc_detection_tracker_ = std::make_shared<planner_correction::DetectionTracker>();
     // Instantiate action clients and utilities
-    custom_nav2_action_client2::NavigateToPoseClient navigate_to_pose_client(node);
+    custom_nav2_action_client2::NavigateToPoseClient navigate_to_pose_client(node, pc_detection_tracker_);
     custom_nav2_action_client2::ComputePathToPoseClient path_to_pose_client(node);
     custom_nav2_action_client2::NavigateThroughPosesClient navigate_to_poses_client(node);
     navigate_to_pose_client.initialize();

@@ -104,7 +104,11 @@ namespace pointcloud_processing
 
         std::shared_ptr<visualization::VisualizationManager> vis_manager_;
         std::shared_ptr<waypointGen::TableWayPointGen> way_point_generator_;
-    };
-} 
 
-#endif 
+        // Parameter clients
+        rclcpp::AsyncParametersClient::SharedPtr arm_controller_param_client_;
+        void ActivateArm_ForSnapshot();
+    };
+}
+
+#endif

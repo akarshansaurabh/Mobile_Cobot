@@ -37,6 +37,7 @@
 
 #include "planner_module/waypoint_gen.hpp"
 #include "planner_module/planner_correction.hpp"
+// #include "pc_processing/octomap_generator.hpp"
 
 #include "std_msgs/msg/float64.hpp"
 #include "std_msgs/msg/string.hpp"
@@ -65,7 +66,7 @@ namespace custom_nav2_action_client2
         using ActionType = nav2_msgs::action::NavigateToPose;
         using GoalHandle = rclcpp_action::ClientGoalHandle<ActionType>;
 
-        explicit NavigateToPoseClient(rclcpp::Node::SharedPtr node);
+        explicit NavigateToPoseClient(rclcpp::Node::SharedPtr node, std::shared_ptr<planner_correction::DetectionTracker> detection_tracker__);
         void initialize();
 
         void SendGoal(const ActionType::Goal &goal_msg);
@@ -78,6 +79,7 @@ namespace custom_nav2_action_client2
 
     private:
         rclcpp_action::Client<ActionType>::SharedPtr action_client_;
+        std::shared_ptr<planner_correction::DetectionTracker> detection_tracker_;
         GoalHandle::SharedPtr goal_handle_;
         bool goal_active_;
         ActionType::Goal nav_to_pose_desired_pose_;

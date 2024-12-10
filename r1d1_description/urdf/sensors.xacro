@@ -2,10 +2,6 @@
 <robot name="r1d1" xmlns:xacro="http://www.ros.org/wiki/xacro" >
 
     <!-- xacro properties -->
-    <xacro:property name="front_camera_length" value="0.02"/>
-    <xacro:property name="front_camera_breadth" value="0.1"/>
-    <xacro:property name="front_camera_height" value="0.05"/>
-
     <xacro:property name="rear_camera_length" value="0.02"/>
     <xacro:property name="rear_camera_breadth" value="0.1"/>
     <xacro:property name="rear_camera_height" value="0.05"/>
@@ -53,29 +49,6 @@
         <origin xyz="0 0 0.1" rpy="0 0 0"/> <!-- Adjust position as needed -->
     </joint>
 
-
-    <!-- Front Camera -->
-    <link name="front_rgbd_camera_link">
-        <visual>
-            <geometry>
-                <box size="${front_camera_length} ${front_camera_breadth} ${front_camera_height}"/>
-            </geometry>
-            <material name="black"/>
-        </visual>
-        <collision>
-            <geometry>
-                <box size="${front_camera_length} ${front_camera_breadth} ${front_camera_height}"/>
-            </geometry>
-        </collision>
-        <xacro:box_inertia m="0.1" l="${front_camera_length}" b="${front_camera_breadth}" h="${front_camera_height}"
-                           xyz="0 0 0" rpy="0 0 0"/>
-    </link>
-
-    <joint name="front_camera_joint" type="fixed">
-        <parent link="base_link"/>
-        <child link="front_rgbd_camera_link"/>
-        <origin xyz="0.26 0 0.18" rpy="0 0 0"/>
-    </joint>
 
     <!-- Rear Camera -->
     <link name="rear_rgbd_camera_link">
@@ -172,38 +145,6 @@
 
 
     <!-- Gazebo Sensor Configurations -->
-    <!-- Front Camera Sensor -->  
-    <gazebo reference="front_rgbd_camera_link">
-        <material>Gazebo/Blue</material>
-        <sensor name="front_rgbd_cam_sensor" type="camera">
-            <pose>0 0 0 0 0 0</pose>
-            <visualize>true</visualize>
-            <update_rate>10.0</update_rate>
-
-            <camera>
-                <horizontal_fov>1.3962634</horizontal_fov>
-                <image>
-                    <width>640</width>
-                    <height>480</height>
-                    <format>R8G8B8</format>
-                </image>
-                <clip>
-                    <near>0.1</near>
-                    <far>10.0</far>
-                </clip>
-            </camera>
-
-            <plugin name="front_rgbd_camera_controller" filename="libgazebo_ros_camera.so">
-                <frame_name>front_rgbd_camera_link</frame_name>
-                <camera_name>front_rgbd_camera</camera_name>
-                <image_topic_name>front_rgbd_camera/image_raw</image_topic_name>
-                <!-- <depth_topic_name>front_rgbd_camera/depth</depth_topic_name> -->
-                <camera_info_topic_name>front_rgbd_camera/camera_info</camera_info_topic_name>
-                <robot_namespace>/r1d1</robot_namespace>
-            </plugin>
-        </sensor>
-    </gazebo>
-
     <!-- Rear Camera Sensor -->
     <gazebo reference="rear_rgbd_camera_link">
         <material>Gazebo/Blue</material>
@@ -356,5 +297,4 @@
             </plugin>
         </sensor>
     </gazebo>
-
 </robot>

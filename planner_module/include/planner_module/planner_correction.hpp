@@ -21,6 +21,13 @@
 
 namespace planner_correction
 {
+    enum class DetectionTracker
+    {
+        DETECT_TABLE,
+        DETECT_BOXES,
+        DETECT_NOTHING
+    };
+
     class AMRCorrection
     {
     private:
@@ -28,6 +35,7 @@ namespace planner_correction
         std::string global_frame_;
         std::atomic<bool> start_odometry_check, correction_is_complete;
         rclcpp::TimerBase::SharedPtr correction_timer_;
+        std::shared_ptr<DetectionTracker> detection_tracker_;
 
         rclcpp::Node::SharedPtr node_;
         std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
@@ -37,7 +45,7 @@ namespace planner_correction
         rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pc_processing_pub_;
 
     public:
-        explicit AMRCorrection(rclcpp::Node::SharedPtr node);
+        explicit AMRCorrection(rclcpp::Node::SharedPtr node, std::shared_ptr<DetectionTracker> detection_tracker__);
         void CorrectOrientation(bool publish_data);
         ~AMRCorrection() = default;
 

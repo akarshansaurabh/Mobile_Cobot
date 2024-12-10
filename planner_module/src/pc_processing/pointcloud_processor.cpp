@@ -43,6 +43,8 @@ namespace pointcloud_processing
         this->declare_parameter("pc_processing_param", "stop");
 
         way_point_generator_ = std::make_shared<waypointGen::TableWayPointGen>();
+
+        arm_controller_param_client_ = std::make_shared<rclcpp::AsyncParametersClient>(this, "custom_arm_controller_node");
     }
     void PointCloudProcessor::initialize()
     {
@@ -98,6 +100,44 @@ namespace pointcloud_processing
             }
         }
         return result;
+    }
+
+    void PointCloudProcessor::ActivateArm_ForSnapshot()
+    {
+        if (!arm_controller_param_client_->wait_for_service(10s))
+        {
+            RCLCPP_ERROR(this->get_logger(), "arm_pose_name parameter service not available.");
+            return;
+        }
+
+        // vector of params of target node that i want to change
+        std::vector<rclcpp::Parameter> params = {rclcpp::Parameter("arm_pose_name", "c1")};
+        auto future = arm_controller_param_client_->set_parameters(params);
+
+        std::thread([this, future = std::move(future), params]() mutable
+                    {
+        try
+        {
+            auto results = future.get();
+            for (size_t i = 0; i < results.size(); ++i)
+            {
+                if (!results[i].successful)
+                {
+                    RCLCPP_ERROR(this->get_logger(), "Failed to set parameter '%s': %s",
+                                 params[i].get_name().c_str(), results[i].reason.c_str());
+                }
+                else
+                {
+                    RCLCPP_INFO(this->get_logger(), "Successfully set parameter '%s'",
+                                params[i].get_name().c_str());
+                }
+            }
+        }
+        catch (const std::exception &e)
+        {
+            RCLCPP_ERROR(this->get_logger(), "Exception while setting parameters: %s", e.what());
+        } })
+            .detach();
     }
 
     void PointCloudProcessor::pointCloudCallback(const sensor_msgs::msg::PointCloud2::ConstSharedPtr &msg)
@@ -156,6 +196,8 @@ namespace pointcloud_processing
             RCLCPP_INFO(this->get_logger(), "Box found in the point cloud.");
             pcl_cloud.swap(top_faces);
             vis_manager_->publishMarkerArray(box_poses);
+            // send singnal to the arm controller node to move to c1 and initiate octomap gen pipeline
+            ActivateArm_ForSnapshot();
         }
         else
             RCLCPP_WARN(this->get_logger(), "Box not found in the point cloud.");
