@@ -33,6 +33,9 @@
 #include <iostream>
 #include <memory>
 #include "planner_module/waypoint_gen.hpp"
+#include "custom_interfaces/srv/boxpose_estimator.hpp"
+#include "custom_interfaces/msg/table_vertices.hpp"
+#include "pc_processing/octomap_generator.hpp"
 
 using namespace std;
 
@@ -46,14 +49,19 @@ namespace pointcloud_processing
         ~PointCloudProcessor() = default;
 
     private:
+        std::vector<geometry_msgs::msg::Point> table_vertices;
+        double min_x, max_x, min_y, max_y;
         // Callback functions
         void pointCloudCallback(const sensor_msgs::msg::PointCloud2::ConstSharedPtr &msg);
         void pointCloudTableDetectionCallback(const sensor_msgs::msg::PointCloud2::ConstSharedPtr &msg);
+        void Server6DPoseCallback(const std::shared_ptr<custom_interfaces::srv::BoxposeEstimator::Request> request,
+                                  std::shared_ptr<custom_interfaces::srv::BoxposeEstimator::Response> response);
 
         // Processing functions
         void preprocessPointCloud(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud, bool is_table);
         bool transformPointCloudToTargetFrame(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud, const std_msgs::msg::Header &header);
-        void filterPointCloudInROI(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud, const std_msgs::msg::Header &header);
+        void filterPointCloudInROI(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud, const std_msgs::msg::Header &header,
+                                   const std::vector<geometry_msgs::msg::Point> &table_vertices, double min_x, double max_x, double min_y, double max_y);
         void removePlanes(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud);
         void extractClusters(const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud,
                              std::vector<pcl::PointIndices> &cluster_indices);
@@ -70,6 +78,8 @@ namespace pointcloud_processing
         rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr table_detection_sub_;
         rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pointcloud_pub_;
         rclcpp::Publisher<geometry_msgs::msg::Vector3>::SharedPtr move_amr_pub_;
+        rclcpp::Publisher<custom_interfaces::msg::TableVertices>::SharedPtr table_vertices_pub_;
+        rclcpp::Service<custom_interfaces::srv::BoxposeEstimator>::SharedPtr box6dposes_server_;
 
         // TF2 buffer and listener
         std::shared_ptr<tf2_ros::Buffer> tf_buffer_;

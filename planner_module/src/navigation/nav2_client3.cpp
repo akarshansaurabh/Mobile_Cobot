@@ -140,8 +140,9 @@ namespace custom_nav2_action_client2
                 *detection_tracker_ = planner_correction::DetectionTracker::DETECT_TABLE;
             else
             {
-                if (*detection_tracker_ == planner_correction::DetectionTracker::DETECT_TABLE)
-                    *detection_tracker_ = planner_correction::DetectionTracker::DETECT_BOXES;
+                *detection_tracker_ = planner_correction::DetectionTracker::DETECT_NOTHING;
+                // if (*detection_tracker_ == planner_correction::DetectionTracker::DETECT_TABLE)
+                //     *detection_tracker_ = planner_correction::DetectionTracker::DETECT_BOXES;
             }
             amr_correction_->CorrectOrientation(is_table_destination_);
             break;
@@ -359,7 +360,6 @@ namespace custom_nav2_action_client2
         controller_server_param_client_ = std::make_shared<rclcpp::AsyncParametersClient>(node_, "/controller_server");
         velocity_smoother_param_client_ = std::make_shared<rclcpp::AsyncParametersClient>(node_, "/velocity_smoother");
         activate_costmap_comparison_param_client_ = std::make_shared<rclcpp::AsyncParametersClient>(node_, "/obstacle_monitor_node");
-        table_detection_param_client_ = std::make_shared<rclcpp::AsyncParametersClient>(node_, "/pointcloud_processor_node");
 
         parameter_callback_handle_ = node_->add_on_set_parameters_callback(
             std::bind(&Nav2Utilities::DestinationUpdatedCallback, this, std::placeholders::_1));
@@ -369,10 +369,6 @@ namespace custom_nav2_action_client2
 
         std::string config_file = "/home/akarshan/mobile_cobot_ws/src/r1d1_description/config/locations.yaml";
         table_analyser = std::make_unique<waypointGen::TablePathAnalyzer>(config_file, 1.0);
-
-        pc_processing_sub_ = node_->create_subscription<std_msgs::msg::String>(
-            "/activate_pc_processing", rclcpp::QoS(10),
-            std::bind(&Nav2Utilities::pointCloudActivationCallback, this, std::placeholders::_1));
     }
 
     void Nav2Utilities::ActivateCostmapParameters(bool activate)
@@ -472,49 +468,6 @@ namespace custom_nav2_action_client2
         {
             RCLCPP_ERROR(node_->get_logger(), "Exception while setting parameters: %s", e.what());
         }
-    }
-
-    void Nav2Utilities::ActivatePCProcessingParameters(const std::string &param)
-    {
-        if (!table_detection_param_client_->wait_for_service(10s))
-        {
-            RCLCPP_ERROR(node_->get_logger(), "PC Processing parameter service not available.");
-            return;
-        }
-
-        std::vector<rclcpp::Parameter> params = {rclcpp::Parameter("pc_processing_param", param)};
-        auto future = table_detection_param_client_->set_parameters(params);
-
-        std::thread([this, future = std::move(future), params]() mutable
-                    {
-        try
-        {
-            auto results = future.get();
-            for (size_t i = 0; i < results.size(); ++i)
-            {
-                if (!results[i].successful)
-                {
-                    RCLCPP_ERROR(node_->get_logger(), "Failed to set parameter '%s': %s",
-                                 params[i].get_name().c_str(), results[i].reason.c_str());
-                }
-                else
-                {
-                    RCLCPP_INFO(node_->get_logger(), "Successfully set parameter '%s'",
-                                params[i].get_name().c_str());
-                }
-            }
-        }
-        catch (const std::exception &e)
-        {
-            RCLCPP_ERROR(node_->get_logger(), "Exception while setting parameters: %s", e.what());
-        } })
-            .detach();
-    }
-
-    void Nav2Utilities::pointCloudActivationCallback(const std_msgs::msg::String::ConstSharedPtr &msg)
-    {
-        // std::string str = msg->data;
-        ActivatePCProcessingParameters(msg->data);
     }
 
     void Nav2Utilities::SetInitialPose(const geometry_msgs::msg::PoseWithCovarianceStamped &initial_pose)

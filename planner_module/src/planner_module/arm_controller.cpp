@@ -8,11 +8,17 @@ using namespace std::chrono_literals;
 
 namespace arm_planner
 {
+    std::vector<geometry_msgs::msg::Point> table_vertices_;
+
     ArmController::ArmController(const rclcpp::Node::SharedPtr &node) : node_(node)
     {
         // Initialize Action Client
         joint_trajectory_action_client_ = rclcpp_action::create_client<FollowJointTrajectory>(
             node_, "/joint_trajectory_controller/follow_joint_trajectory");
+
+        table_vertices_sub_ = node_->create_subscription<custom_interfaces::msg::TableVertices>(
+            "/table_vertices_topic", rclcpp::QoS(10),
+            std::bind(&ArmController::TableVerticesCallback, this, std::placeholders::_1));
 
         // Wait for the action server to be available
         if (!joint_trajectory_action_client_->wait_for_action_server(30s))
@@ -29,9 +35,10 @@ namespace arm_planner
 
         node_->declare_parameter<std::string>("arm_pose_name", "nav_pose");
 
-        // Initialize the viewpoint sequence c1, c2, c3
-        viewpoint_sequence_ = {"c1", "c2", "c3"};
         yaml_file_ = "/home/akarshan/mobile_cobot_ws/src/r1d1_description/config/arm_poses.yaml";
+
+        octomap_pub_ = node_->create_publisher<sensor_msgs::msg::PointCloud2>(
+            "/octomap_topic_", rclcpp::QoS(10));
     }
 
     // Method to create a joint trajectory
@@ -96,11 +103,6 @@ namespace arm_planner
     void ArmController::JointTrajectoryFeedbackCallback(const GoalHandleFollowJointTrajectory::SharedPtr &goal_handle,
                                                         const std::shared_ptr<const FollowJointTrajectory::Feedback> feedback)
     {
-        RCLCPP_INFO(node_->get_logger(), "Joint Trajectory Feedback received");
-        std::string feedback_str = "Current Positions: ";
-        for (const auto &pos : feedback->desired.positions)
-            feedback_str += std::to_string(pos) + " ";
-        RCLCPP_INFO(node_->get_logger(), "%s", feedback_str.c_str());
     }
 
     void ArmController::proceedToNextViewpoint(std::string str)
@@ -111,48 +113,36 @@ namespace arm_planner
         this->SendJointTrajectoryGoal(arm_goal);
     }
 
-    void ArmController::triggerSnapshotForCurrentViewpoint()
+    void ArmController::triggerSnapshotForCurrentViewpoint(bool stitch)
     {
         RCLCPP_INFO(node_->get_logger(), "Triggering snapshot for viewpoint: %s", arm_goal_pose_name_.c_str());
 
-        // std::thread([this]()
-        //             {
-        // rclcpp::Node::SharedPtr node = node_->shared_from_this();
-        // auto stitcher = std::make_shared<PointCloudStitcherMethod2>(node, "map");
-        // // Simulate waiting and capturing pointcloud
-        // std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        static std::mutex m;
+        static std::condition_variable cv;
+        static bool callback_triggered = false;
+        // Reset callback_triggered before starting a new wait
+        callback_triggered = false;
 
-        // // Create a dummy cloud
-        // pcl::PointCloud<pcl::PointXYZRGB>::Ptr dummy_cloud(new pcl::PointCloud<pcl::PointXYZRGB>());
-        // for (int i = 0; i < 100; i++) {
-        //     pcl::PointXYZRGB p;
-        //     p.x = 0.1f * i; p.y = 0.0f; p.z = 1.0f;
-        //     p.r = 100; p.g = 100; p.b = 255;
-        //     dummy_cloud->points.push_back(p);
-        // }
-        // sensor_msgs::msg::PointCloud2 msg;
-        // pcl::toROSMsg(*dummy_cloud, msg);
-        // msg.header.frame_id = "camera_link";
-        // msg.header.stamp = node->now();
+        std::thread([this, stitch]()
+                    {
+                        auto stitcher = std::make_shared<octoMapGenerator::PointCloudStitcher>(node_, "map", m, cv, callback_triggered, 
+                                                                                                      stitch, octomap_pub_);  //accumulated_cloud_
+                        stitcher->SetVertices(arm_planner::table_vertices_);
+                        RCLCPP_INFO(node_->get_logger(), "Stitcher object created in separate thread, waiting for snapshots.");
 
-        // // Add snapshot
-        // stitcher->addCloudSnapshot(msg);
+                        // Wait until callback is triggered
+                        {
+                            std::unique_lock<std::mutex> lock(m);
+                            // Wait until callback_triggered is true
+                            cv.wait(lock, [&callback_triggered]()
+                                    { return callback_triggered; });
+                        }
 
-        // If this was the last viewpoint c3, finalize
-        // Actually, finalization should happen after we finish c3 in main logic.
-        // But let's just store or handle finalization in finishSnapshotSequence.
-        // Just a demonstration of concurrency.
-        // if (current_viewpoint_index_ == viewpoint_sequence_.size() - 1) {
-        //     // finalize stitching
-        //     stitcher->finalizeStitching(0.01f);
-        //     auto final_cloud = stitcher->getStitchedCloud();
-        //     RCLCPP_INFO(node->get_logger(), "Final stitched cloud size: %zu", final_cloud->size());
-        // } else {
-        //     // For c1 and c2, we do not finalize yet, we wait until c3 is done.
-        // }
-
-        // RCLCPP_INFO(node->get_logger(), "Snapshot for %s processed.", viewpoint_sequence_[current_viewpoint_index_].c_str()); })
-        //     .detach();
+                        // this->accumulated_cloud_ = stitcher->accumulated_cloud_;
+                        
+                        RCLCPP_INFO(node_->get_logger(), "Snapshot callback triggered, proceeding..."); })
+            .detach();
+        // std::this_thread::sleep_for(std::chrono::milliseconds(250));
     }
 
     // Action Callback: Result
@@ -162,30 +152,20 @@ namespace arm_planner
         {
         case rclcpp_action::ResultCode::SUCCEEDED:
             RCLCPP_INFO(node_->get_logger(), "Joint Trajectory Goal succeeded");
-            /*
-            if octomap geretation is on, then send the remaining view points to server one by one after the completion of the previous view point trajectory
-            Kepp sending untill the last view point is sent. Once the last view point trajectory execution is finished, then stop sending the point
-            */
             if (arm_goal_pose_name_ == "c1")
             {
-                // arm has just reached "c1"
-                // 1. take snapshot at t = t1
-
-                // 2. send c2 at t = t1
+                triggerSnapshotForCurrentViewpoint(false);
                 proceedToNextViewpoint("c2");
             }
             else if (arm_goal_pose_name_ == "c2")
             {
-                // arm has just reached "c2"
-                // 1. take snapshot at t = t2
-                // 2. send c3 at t = t2
+                triggerSnapshotForCurrentViewpoint(false);
                 proceedToNextViewpoint("c3");
             }
             else if (arm_goal_pose_name_ == "c3")
             {
-                // arm has just reached "c3"
-                // 1. take snapshot at t = t3
-                // 2. sticth pointcloud
+                triggerSnapshotForCurrentViewpoint(true);
+                proceedToNextViewpoint("nav_pose");
             }
             break;
         case rclcpp_action::ResultCode::CANCELED:
@@ -291,5 +271,10 @@ namespace arm_planner
         trajectory_msgs::msg::JointTrajectory arm_goal = CreateJointTrajectory(arm_goal_positions, execution_time_);
         this->SendJointTrajectoryGoal(arm_goal);
         return result;
+    }
+
+    void ArmController::TableVerticesCallback(const custom_interfaces::msg::TableVertices::ConstSharedPtr &table_msg)
+    {
+        table_vertices_ = table_msg->vertices;
     }
 }

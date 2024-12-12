@@ -44,6 +44,11 @@ namespace planner_correction
         rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_pub_;
         rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pc_processing_pub_;
 
+        rclcpp::AsyncParametersClient::SharedPtr table_detection_param_client_;
+        rclcpp::AsyncParametersClient::SharedPtr arm_controller_param_client_;
+        void ActivatePCProcessingParameters(const std::string &param);
+        void ActivateArm_ForSnapshot();
+
     public:
         explicit AMRCorrection(rclcpp::Node::SharedPtr node, std::shared_ptr<DetectionTracker> detection_tracker__);
         void CorrectOrientation(bool publish_data);

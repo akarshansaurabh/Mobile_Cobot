@@ -186,7 +186,7 @@ namespace custom_nav2_action_client2
         rclcpp::AsyncParametersClient::SharedPtr controller_server_param_client_;
         rclcpp::AsyncParametersClient::SharedPtr velocity_smoother_param_client_;
         rclcpp::AsyncParametersClient::SharedPtr activate_costmap_comparison_param_client_;
-        rclcpp::AsyncParametersClient::SharedPtr table_detection_param_client_;
+        // rclcpp::AsyncParametersClient::SharedPtr table_detection_param_client_;
 
         // TF
         tf2_ros::Buffer tf_buffer_;
@@ -212,8 +212,8 @@ namespace custom_nav2_action_client2
         // After receiving both paths, decide which is shorter and send final nav_to_pose
         void DecideAndSendFinalGoal();
         // pc processing activation
-        rclcpp::Subscription<std_msgs::msg::String>::SharedPtr pc_processing_sub_;
-        void pointCloudActivationCallback(const std_msgs::msg::String::ConstSharedPtr &msg);
+        // rclcpp::Subscription<std_msgs::msg::String>::SharedPtr pc_processing_sub_;
+        // void pointCloudActivationCallback(const std_msgs::msg::String::ConstSharedPtr &msg);
     };
 
 }

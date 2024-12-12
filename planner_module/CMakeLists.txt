@@ -34,6 +34,7 @@ find_package(tf2 REQUIRED)
 find_package(visualization_msgs REQUIRED)
 find_package(ruckig REQUIRED)
 find_package(kdl_parser REQUIRED)
+find_package(custom_interfaces REQUIRED)
 
 include_directories(include 
   ${YAML_CPP_INCLUDE_DIR} 
@@ -66,7 +67,8 @@ target_link_libraries(nav2_client3
 
 
 add_executable(pc_processing1 src/pc_processing/pointcloud_processor.cpp src/planner_module/waypoint_gen.cpp
-               src/main/pc_processing_main1.cpp src/visualizations/visualization_manager.cpp)
+               src/main/pc_processing_main1.cpp src/visualizations/visualization_manager.cpp
+               src/pc_processing/octomap_generator.cpp)
 ament_target_dependencies(pc_processing1
   rclcpp
   tf2_ros
@@ -83,6 +85,7 @@ ament_target_dependencies(pc_processing1
   std_msgs
   tf2_geometry_msgs
   visualization_msgs
+  custom_interfaces
 )
 target_link_libraries(pc_processing1
  ${PCL_LIBRARIES}
@@ -91,7 +94,7 @@ target_link_libraries(pc_processing1
 
 
 add_executable(arm_client src/planner_module/arm_controller.cpp
-               src/main/arm_contoller_main.cpp)
+               src/main/arm_contoller_main.cpp src/pc_processing/octomap_generator.cpp)
 ament_target_dependencies(arm_client
   rclcpp
   yaml-cpp
@@ -100,9 +103,21 @@ ament_target_dependencies(arm_client
   rclcpp_action
   trajectory_msgs
   builtin_interfaces
+  tf2_ros
+  tf2_eigen
+  sensor_msgs
+  pcl_conversions
+  pcl_ros
+  tf2_sensor_msgs
+  tf2
+  std_msgs
+  tf2_geometry_msgs
+  visualization_msgs
+  custom_interfaces
 )
 target_link_libraries(arm_client
   yaml-cpp
+  ${PCL_LIBRARIES}
 )
 
 add_executable(obstacle_monitoring src/obstacle/obstacle_monitoring.cpp

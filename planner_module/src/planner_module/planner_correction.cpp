@@ -1,4 +1,6 @@
 #include "planner_module/planner_correction.hpp"
+using namespace std::chrono_literals;
+using namespace std;
 
 namespace planner_correction
 {
@@ -10,6 +12,8 @@ namespace planner_correction
         cmd_vel_pub_ = node_->create_publisher<geometry_msgs::msg::Twist>("/cmd_vel", 10);
         pc_processing_pub_ = node_->create_publisher<std_msgs::msg::String>("/activate_pc_processing", 10);
         start_odometry_check = correction_is_complete = false;
+        table_detection_param_client_ = std::make_shared<rclcpp::AsyncParametersClient>(node_, "/pointcloud_processor_node");
+        arm_controller_param_client_ = std::make_shared<rclcpp::AsyncParametersClient>(node_, "/custom_arm_controller_node");
     }
 
     void AMRCorrection::OdometryCheckCallback(const nav_msgs::msg::Odometry::ConstSharedPtr &odom_msg_)
@@ -51,13 +55,8 @@ namespace planner_correction
 
         geometry_msgs::msg::Twist cmd_vel;
         cmd_vel.angular.z = (angle_difference > 0) ? 1.5 : -1.5;
-        if (angle_difference > 0)
-            std::cout << "anti" << std::endl;
-        else
-            std::cout << "clockwise" << std::endl;
 
         rclcpp::Rate rate(10);
-        std::cout << "correction started!" << std::endl;
         correction_timer_ = node_->create_wall_timer(
             std::chrono::milliseconds(10),
             [this, cmd_vel, publish_data]() { // Removed 'mutable'
@@ -69,41 +68,96 @@ namespace planner_correction
                 {
                     geometry_msgs::msg::Twist cmd_vel_;
                     cmd_vel_.angular.z = 0.0;
-                    std::cout << "stopping" << std::endl;
                     for (int i = 0; i < 200; i++)
                     {
                         cmd_vel_pub_->publish(cmd_vel_);
                         std::this_thread::sleep_for(std::chrono::milliseconds(5));
                     }
-                    std_msgs::msg::String detection;
+                    // std_msgs::msg::String detection;
+                    std::string detection = "detect_table";
                     if (publish_data)
-                    {
-                        detection.data = "detect_table";
-                        std::cout << "table detection!" << std::endl;
-                        pc_processing_pub_->publish(detection);
-                        /*
-                        in this case, after table is detected, displacement vec is computed
-                        perception sends a msg to nav2 client which then send another goal and make publish_data = false
-                        */
-                    }
+                        ActivatePCProcessingParameters(detection);
                     else
-                    {
-                        // perception does not send any data to nav2 client
-                        if (*detection_tracker_ == DetectionTracker::DETECT_BOXES)
-                        {
-                            std::cout << "boxes 6d pose estimation!" << std::endl;
-                            detection.data = "detect_boxes";
-                            *detection_tracker_ == DetectionTracker::DETECT_NOTHING;
-                        }
-                        else if (*detection_tracker_ == DetectionTracker::DETECT_NOTHING)
-                        {
-                            std::cout << "do nothing!" << std::endl;
-                            detection.data = "ignore";
-                        }
-                        pc_processing_pub_->publish(detection);
-                    }
+                        ActivateArm_ForSnapshot();
+
                     correction_timer_.reset();
                 }
             });
     }
+
+    void AMRCorrection::ActivatePCProcessingParameters(const std::string &param)
+    {
+        if (!table_detection_param_client_->wait_for_service(10s))
+        {
+            RCLCPP_ERROR(node_->get_logger(), "PC Processing parameter service not available.");
+            return;
+        }
+
+        std::vector<rclcpp::Parameter> params = {rclcpp::Parameter("pc_processing_param", param)};
+        auto future = table_detection_param_client_->set_parameters(params);
+
+        std::thread([this, future = std::move(future), params]() mutable
+                    {
+        try
+        {
+            auto results = future.get();
+            for (size_t i = 0; i < results.size(); ++i)
+            {
+                if (!results[i].successful)
+                {
+                    RCLCPP_ERROR(node_->get_logger(), "Failed to set parameter '%s': %s",
+                                 params[i].get_name().c_str(), results[i].reason.c_str());
+                }
+                else
+                {
+                    RCLCPP_INFO(node_->get_logger(), "Successfully set parameter '%s'",
+                                params[i].get_name().c_str());
+                }
+            }
+        }
+        catch (const std::exception &e)
+        {
+            RCLCPP_ERROR(node_->get_logger(), "Exception while setting parameters: %s", e.what());
+        } })
+            .detach();
+    }
+
+    void AMRCorrection::ActivateArm_ForSnapshot()
+    {
+        if (!arm_controller_param_client_->wait_for_service(10s))
+        {
+            RCLCPP_ERROR(node_->get_logger(), "arm_pose_name parameter service not available.");
+            return;
+        }
+
+        // vector of params of target node that i want to change
+        std::vector<rclcpp::Parameter> params = {rclcpp::Parameter("arm_pose_name", "c1")};
+        auto future = arm_controller_param_client_->set_parameters(params);
+
+        std::thread([this, future = std::move(future), params]() mutable
+                    {
+        try
+        {
+            auto results = future.get();
+            for (size_t i = 0; i < results.size(); ++i)
+            {
+                if (!results[i].successful)
+                {
+                    RCLCPP_ERROR(node_->get_logger(), "Failed to set parameter '%s': %s",
+                                 params[i].get_name().c_str(), results[i].reason.c_str());
+                }
+                else
+                {
+                    RCLCPP_INFO(node_->get_logger(), "Successfully set parameter '%s'",
+                                params[i].get_name().c_str());
+                }
+            }
+        }
+        catch (const std::exception &e)
+        {
+            RCLCPP_ERROR(node_->get_logger(), "Exception while setting parameters: %s", e.what());
+        } })
+            .detach();
+    }
+
 }

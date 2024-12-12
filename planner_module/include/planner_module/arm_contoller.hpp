@@ -15,6 +15,9 @@
 #include <rclcpp_action/rclcpp_action.hpp>
 #include <yaml-cpp/yaml.h>
 
+#include "pc_processing/octomap_generator.hpp"
+#include "custom_interfaces/msg/table_vertices.hpp"
+
 using namespace std;
 using namespace std::placeholders;
 using namespace std::chrono_literals;
@@ -23,6 +26,7 @@ namespace arm_planner
 {
     using FollowJointTrajectory = control_msgs::action::FollowJointTrajectory;
     using GoalHandleFollowJointTrajectory = rclcpp_action::ClientGoalHandle<FollowJointTrajectory>;
+    extern std::vector<geometry_msgs::msg::Point> table_vertices_;
 
     class ArmController
     {
@@ -30,25 +34,18 @@ namespace arm_planner
         ArmController(const rclcpp::Node::SharedPtr &node);
         ~ArmController() = default;
 
-        // Flag that is set by external code (e.g. nav2) to start the snapshot process
-        std::atomic<bool> start_taking_snapshots_;
-
     private:
         rclcpp::Node::SharedPtr node_;
         GoalHandleFollowJointTrajectory::SharedPtr arm_goal_hangle_;
         std::string arm_goal_pose_name_, yaml_file_;
 
-        // Action Client
         rclcpp_action::Client<FollowJointTrajectory>::SharedPtr joint_trajectory_action_client_;
-
-        // To track the sequence of viewpoints c1, c2, c3
-        std::vector<std::string> viewpoint_sequence_;
-        std::size_t current_viewpoint_index_;
-        bool sequence_in_progress_;
+        rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr octomap_pub_;
+        rclcpp::Subscription<custom_interfaces::msg::TableVertices>::SharedPtr table_vertices_sub_;
 
         void proceedToNextViewpoint(std::string str);
-        void triggerSnapshotForCurrentViewpoint();
-        // void finishSnapshotSequence();
+        void triggerSnapshotForCurrentViewpoint(bool stitch);
+        void TableVerticesCallback(const custom_interfaces::msg::TableVertices::ConstSharedPtr &table_msg);
 
         // Methods
         void SendJointTrajectoryGoal(const trajectory_msgs::msg::JointTrajectory &trajectory);
@@ -64,6 +61,12 @@ namespace arm_planner
         // ros2 parameter callbacks
         rcl_interfaces::msg::SetParametersResult ArmGoalUpdatedCallback(const std::vector<rclcpp::Parameter> &parameters);
         std::shared_ptr<rclcpp::node_interfaces::OnSetParametersCallbackHandle> parameter_callback_handle_; // used for parameter registration
+
+        static std::mutex m;
+        static std::condition_variable cv;
+        static bool callback_triggered;
+
+        pcl::PointCloud<pcl::PointXYZRGB>::Ptr accumulated_cloud_;
     };
 }
 

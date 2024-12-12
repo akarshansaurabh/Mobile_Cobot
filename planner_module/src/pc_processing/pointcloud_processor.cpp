@@ -15,7 +15,7 @@ namespace pointcloud_processing
           roi_max_y_(10.0f),
           roi_min_z_(0.4f),
           roi_max_z_(1.5),
-          plane_distance_threshold_(0.03),
+          plane_distance_threshold_(0.01),
           min_plane_inliers_(800),
           ransac_success_(false),
           min_cluster_size_(50),
@@ -35,9 +35,16 @@ namespace pointcloud_processing
 
         // Publisher for the processed point cloud
         pointcloud_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(
-            "/arm_rgbd_camera/points_map", rclcpp::QoS(10));
+            "/arm_rgbd_camera/processed_pc", rclcpp::QoS(10));
         move_amr_pub_ = this->create_publisher<geometry_msgs::msg::Vector3>(
             "/move_amr_topic", rclcpp::QoS(10));
+        table_vertices_pub_ = this->create_publisher<custom_interfaces::msg::TableVertices>(
+            "/table_vertices_topic", rclcpp::QoS(10));
+
+        box6dposes_server_ = this->create_service<custom_interfaces::srv::BoxposeEstimator>(
+            "six_d_pose_estimate_service",
+            std::bind(&PointCloudProcessor::Server6DPoseCallback, this,
+                      std::placeholders::_1, std::placeholders::_2));
 
         // Declare parameters
         this->declare_parameter("pc_processing_param", "stop");
@@ -46,6 +53,7 @@ namespace pointcloud_processing
 
         arm_controller_param_client_ = std::make_shared<rclcpp::AsyncParametersClient>(this, "custom_arm_controller_node");
     }
+
     void PointCloudProcessor::initialize()
     {
         vis_manager_ = std::make_shared<visualization::VisualizationManager>(shared_from_this());
@@ -140,6 +148,90 @@ namespace pointcloud_processing
             .detach();
     }
 
+    void PointCloudProcessor::Server6DPoseCallback(const std::shared_ptr<custom_interfaces::srv::BoxposeEstimator::Request> request,
+                                                   std::shared_ptr<custom_interfaces::srv::BoxposeEstimator::Response> response)
+    {
+        // Example processing: print the size of table_vertices and delta
+        RCLCPP_INFO(this->get_logger(), "Number of table vertices: %zu", request->table_vertices.size());
+        RCLCPP_INFO(this->get_logger(), "Delta value: %f", request->delta);
+        RCLCPP_INFO(this->get_logger(), "Received PointCloud2 with width: %u, height: %u", request->cloud.width, request->cloud.height);
+
+        auto pcl_cloud = std::make_shared<pcl::PointCloud<pcl::PointXYZRGB>>();
+        pcl::fromROSMsg(request->cloud, *pcl_cloud);
+
+        // Preprocess the point cloud
+        preprocessPointCloud(pcl_cloud, false);
+
+        // Transform point cloud to target frame
+        if (!transformPointCloudToTargetFrame(pcl_cloud, request->cloud.header))
+            return;
+
+        // Filter points within ROI
+        filterPointCloudInROI(pcl_cloud, request->cloud.header, table_vertices, min_x, max_x, min_y, max_y);
+        if (pcl_cloud->empty())
+        {
+            RCLCPP_WARN(this->get_logger(), "No points remain after ROI filtering.");
+            pointcloud_sub_.reset();
+            return;
+        }
+
+        // Remove planes
+        // removePlanes(pcl_cloud);
+        // if (pcl_cloud->empty())
+        // {
+        //     RCLCPP_WARN(this->get_logger(), "No points remain after plane removal.");
+        //     return;
+        // }
+
+        // // // Extract clusters
+        std::vector<pcl::PointIndices> cluster_indices;
+        min_cluster_size_ = 5;
+        max_cluster_size_ = 1000;
+        cluster_tolerance_ = 0.02;
+        extractClusters(pcl_cloud, cluster_indices);
+
+        min_cluster_size_ = 50;
+        max_cluster_size_ = 1000;
+        cluster_tolerance_ = 0.07;
+        // // Identify top faces
+        bool box_found = false;
+        pcl::PointCloud<pcl::PointXYZRGB>::Ptr top_faces(new pcl::PointCloud<pcl::PointXYZRGB>());
+        std::vector<geometry_msgs::msg::Pose> box_poses;
+        geometry_msgs::msg::Pose box_pose;
+
+        for (const auto &indices : cluster_indices)
+            if (identifyTopFace(indices, pcl_cloud, top_faces, box_pose))
+            {
+                box_found = true;
+                box_poses.push_back(std::move(box_pose));
+            }
+
+        if (box_found)
+        {
+            RCLCPP_INFO(this->get_logger(), "Box found in the point cloud.");
+            pcl_cloud.swap(top_faces);
+            vis_manager_->publishMarkerArray(box_poses);
+            // send singnal to the arm controller node to move to c1 and initiate octomap gen pipeline
+            // ActivateArm_ForSnapshot();
+        }
+        else
+        {
+            RCLCPP_WARN(this->get_logger(), "Box not found in the point cloud.");
+            // ActivateArm_ForSnapshot();
+        }
+
+        // Publish the processed point cloud
+        sensor_msgs::msg::PointCloud2 output_msg;
+        pcl::toROSMsg(*pcl_cloud, output_msg);
+        output_msg.header.stamp = request->cloud.header.stamp;
+        output_msg.header.frame_id = target_frame_;
+        pointcloud_pub_->publish(output_msg);
+
+        // auto end_time = std::chrono::steady_clock::now();
+        // auto processing_time = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
+        // RCLCPP_INFO(this->get_logger(), "Processed point cloud in %ld ms.", processing_time);
+    }
+
     void PointCloudProcessor::pointCloudCallback(const sensor_msgs::msg::PointCloud2::ConstSharedPtr &msg)
     {
         box_detection_counter_++;
@@ -197,10 +289,13 @@ namespace pointcloud_processing
             pcl_cloud.swap(top_faces);
             vis_manager_->publishMarkerArray(box_poses);
             // send singnal to the arm controller node to move to c1 and initiate octomap gen pipeline
-            ActivateArm_ForSnapshot();
+            // ActivateArm_ForSnapshot();
         }
         else
+        {
             RCLCPP_WARN(this->get_logger(), "Box not found in the point cloud.");
+            // ActivateArm_ForSnapshot();
+        }
 
         // Publish the processed point cloud
         sensor_msgs::msg::PointCloud2 output_msg;
@@ -275,40 +370,17 @@ namespace pointcloud_processing
         }
     }
 
-    void PointCloudProcessor::filterPointCloudInROI(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud, const std_msgs::msg::Header &header)
+    void PointCloudProcessor::filterPointCloudInROI(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud, const std_msgs::msg::Header &header,
+                                                    const std::vector<geometry_msgs::msg::Point> &table_vertices, double min_x, double max_x, double min_y, double max_y)
     {
         // Use CropBox filter
         pcl::CropBox<pcl::PointXYZRGB> crop_filter;
         crop_filter.setInputCloud(cloud);
 
         geometry_msgs::msg::PointStamped local_point_min, local_point_max, global_point_min, global_point_max;
-        local_point_min.header.frame_id = local_point_max.header.frame_id = base_frame_;
-        local_point_min.header.stamp = local_point_max.header.stamp = header.stamp;
-        local_point_min.point.x = roi_min_x_;
-        local_point_min.point.y = roi_min_y_;
-        local_point_min.point.z = roi_min_z_;
-        local_point_max.point.x = roi_max_x_;
-        local_point_max.point.y = roi_max_y_;
-        local_point_max.point.z = roi_max_z_;
-        try
-        {
-            tf_buffer_->transform(local_point_min, global_point_min, target_frame_, tf2::durationFromSec(0.1));
-        }
-        catch (tf2::TransformException &ex)
-        {
-            RCLCPP_WARN(this->get_logger(), "Transform error: %s", ex.what());
-        }
-        try
-        {
-            tf_buffer_->transform(local_point_max, global_point_max, target_frame_, tf2::durationFromSec(0.1));
-        }
-        catch (tf2::TransformException &ex)
-        {
-            RCLCPP_WARN(this->get_logger(), "Transform error: %s", ex.what());
-        }
 
-        Eigen::Vector4f min_point(global_point_min.point.x, global_point_min.point.y, global_point_min.point.z, 1.0f);
-        Eigen::Vector4f max_point(global_point_max.point.x, global_point_max.point.y, global_point_max.point.z, 1.0f);
+        Eigen::Vector4f min_point(min_x, min_y, table_vertices[0].z + 0.05, 1.0f);
+        Eigen::Vector4f max_point(max_x - 0.07, max_y, table_vertices[0].z + 0.5, 1.0f);
 
         crop_filter.setMin(min_point);
         crop_filter.setMax(max_point);
@@ -370,6 +442,9 @@ namespace pointcloud_processing
         ec.setSearchMethod(tree);
         ec.setInputCloud(cloud);
         ec.extract(cluster_indices);
+        for (const auto &cluster : cluster_indices)
+            std::cout << "cluster points " << cluster.indices.size() << std::endl;
+        std::cout << "___________________________________" << std::endl;
     }
 
     bool PointCloudProcessor::identifyTopFace(const pcl::PointIndices &cluster_indices, const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud,
@@ -411,6 +486,7 @@ namespace pointcloud_processing
             pcl::ModelCoefficients::Ptr coefficients(new pcl::ModelCoefficients);
             pcl::PointIndices::Ptr inliers(new pcl::PointIndices);
             seg.setInputCloud(cluster_cloud);
+            std::cout << "number of points in the box = " << cluster_cloud->points.size() << std::endl;
             RCLCPP_INFO(this->get_logger(), "RANSAC STARTED.");
             seg.segment(*inliers, *coefficients);
 
@@ -423,6 +499,10 @@ namespace pointcloud_processing
                 max_cluster_size_ *= 2;
                 ransac_success_ = false;
                 break;
+            }
+            else
+            {
+                RCLCPP_INFO(this->get_logger(), "RANSAC SUCCESSFUL");
             }
 
             // Calculate plane normal
@@ -529,9 +609,14 @@ namespace pointcloud_processing
         // }
 
         // Detect table
-        std::vector<geometry_msgs::msg::Point> table_vertices;
+
         if (tableIsPresent(pcl_cloud, table_vertices))
         {
+            custom_interfaces::msg::TableVertices vertices_msg;
+
+            for (const auto &vertex : table_vertices)
+                vertices_msg.vertices.push_back(vertex);
+            table_vertices_pub_->publish(vertices_msg);
             RCLCPP_INFO(this->get_logger(), "Table detected.");
             vis_manager_->publishTableVertices(table_vertices);
             // compute the distance and send it to client
@@ -605,7 +690,7 @@ namespace pointcloud_processing
             if (is_table)
             {
                 // cloud is the table plane
-                double min_x, max_x, min_y, max_y;
+                // double min_x, max_x, min_y, max_y;
                 min_x = max_x = cloud->points[0].x;
                 min_y = max_y = cloud->points[0].y;
 
