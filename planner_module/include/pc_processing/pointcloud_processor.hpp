@@ -52,7 +52,6 @@ namespace pointcloud_processing
         std::vector<geometry_msgs::msg::Point> table_vertices;
         double min_x, max_x, min_y, max_y;
         // Callback functions
-        void pointCloudCallback(const sensor_msgs::msg::PointCloud2::ConstSharedPtr &msg);
         void pointCloudTableDetectionCallback(const sensor_msgs::msg::PointCloud2::ConstSharedPtr &msg);
         void Server6DPoseCallback(const std::shared_ptr<custom_interfaces::srv::BoxposeEstimator::Request> request,
                                   std::shared_ptr<custom_interfaces::srv::BoxposeEstimator::Response> response);
@@ -74,7 +73,6 @@ namespace pointcloud_processing
         OnSetParametersCallbackHandle::SharedPtr parameter_callback_handle_;
 
         // ROS subscribers and publishers
-        rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr pointcloud_sub_;
         rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr table_detection_sub_;
         rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pointcloud_pub_;
         rclcpp::Publisher<geometry_msgs::msg::Vector3>::SharedPtr move_amr_pub_;

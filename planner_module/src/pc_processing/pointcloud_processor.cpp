@@ -82,9 +82,6 @@ namespace pointcloud_processing
                     ransac_success_ = false;
                     if (processing_mode_ == "detect_boxes")
                     {
-                        pointcloud_sub_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
-                            "/arm_rgbd_camera/points", rclcpp::QoS(10),
-                            std::bind(&PointCloudProcessor::pointCloudCallback, this, std::placeholders::_1));
                     }
                     else if (processing_mode_ == "detect_table")
                     {
@@ -171,17 +168,8 @@ namespace pointcloud_processing
         if (pcl_cloud->empty())
         {
             RCLCPP_WARN(this->get_logger(), "No points remain after ROI filtering.");
-            pointcloud_sub_.reset();
             return;
         }
-
-        // Remove planes
-        // removePlanes(pcl_cloud);
-        // if (pcl_cloud->empty())
-        // {
-        //     RCLCPP_WARN(this->get_logger(), "No points remain after plane removal.");
-        //     return;
-        // }
 
         // // // Extract clusters
         std::vector<pcl::PointIndices> cluster_indices;
@@ -189,7 +177,6 @@ namespace pointcloud_processing
         max_cluster_size_ = 1000;
         cluster_tolerance_ = 0.02;
         extractClusters(pcl_cloud, cluster_indices);
-
         min_cluster_size_ = 50;
         max_cluster_size_ = 1000;
         cluster_tolerance_ = 0.07;
@@ -211,13 +198,10 @@ namespace pointcloud_processing
             RCLCPP_INFO(this->get_logger(), "Box found in the point cloud.");
             pcl_cloud.swap(top_faces);
             vis_manager_->publishMarkerArray(box_poses);
-            // send singnal to the arm controller node to move to c1 and initiate octomap gen pipeline
-            // ActivateArm_ForSnapshot();
         }
         else
         {
             RCLCPP_WARN(this->get_logger(), "Box not found in the point cloud.");
-            // ActivateArm_ForSnapshot();
         }
 
         // Publish the processed point cloud
@@ -226,93 +210,6 @@ namespace pointcloud_processing
         output_msg.header.stamp = request->cloud.header.stamp;
         output_msg.header.frame_id = target_frame_;
         pointcloud_pub_->publish(output_msg);
-
-        // auto end_time = std::chrono::steady_clock::now();
-        // auto processing_time = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
-        // RCLCPP_INFO(this->get_logger(), "Processed point cloud in %ld ms.", processing_time);
-    }
-
-    void PointCloudProcessor::pointCloudCallback(const sensor_msgs::msg::PointCloud2::ConstSharedPtr &msg)
-    {
-        box_detection_counter_++;
-        auto start_time = std::chrono::steady_clock::now();
-
-        // Convert ROS PointCloud2 message to PCL PointCloud
-        auto pcl_cloud = std::make_shared<pcl::PointCloud<pcl::PointXYZRGB>>();
-        pcl::fromROSMsg(*msg, *pcl_cloud);
-
-        // Preprocess the point cloud
-        preprocessPointCloud(pcl_cloud, false);
-
-        // Transform point cloud to target frame
-        if (!transformPointCloudToTargetFrame(pcl_cloud, msg->header))
-            return;
-
-        // Filter points within ROI
-        // filterPointCloudInROI(pcl_cloud, msg->header);
-        // if (pcl_cloud->empty())
-        // {
-        //     RCLCPP_WARN(this->get_logger(), "No points remain after ROI filtering.");
-        //     pointcloud_sub_.reset();
-        //     return;
-        // }
-
-        // Remove planes
-        removePlanes(pcl_cloud);
-        if (pcl_cloud->empty())
-        {
-            RCLCPP_WARN(this->get_logger(), "No points remain after plane removal.");
-            return;
-        }
-
-        // Extract clusters
-        std::vector<pcl::PointIndices> cluster_indices;
-        extractClusters(pcl_cloud, cluster_indices);
-        RCLCPP_INFO(this->get_logger(), "Number of clusters: %zu", cluster_indices.size());
-
-        // // Identify top faces
-        bool box_found = false;
-        pcl::PointCloud<pcl::PointXYZRGB>::Ptr top_faces(new pcl::PointCloud<pcl::PointXYZRGB>());
-        std::vector<geometry_msgs::msg::Pose> box_poses;
-        geometry_msgs::msg::Pose box_pose;
-
-        for (const auto &indices : cluster_indices)
-            if (identifyTopFace(indices, pcl_cloud, top_faces, box_pose))
-            {
-                box_found = true;
-                box_poses.push_back(std::move(box_pose));
-            }
-
-        if (box_found)
-        {
-            RCLCPP_INFO(this->get_logger(), "Box found in the point cloud.");
-            pcl_cloud.swap(top_faces);
-            vis_manager_->publishMarkerArray(box_poses);
-            // send singnal to the arm controller node to move to c1 and initiate octomap gen pipeline
-            // ActivateArm_ForSnapshot();
-        }
-        else
-        {
-            RCLCPP_WARN(this->get_logger(), "Box not found in the point cloud.");
-            // ActivateArm_ForSnapshot();
-        }
-
-        // Publish the processed point cloud
-        sensor_msgs::msg::PointCloud2 output_msg;
-        pcl::toROSMsg(*pcl_cloud, output_msg);
-        output_msg.header.stamp = msg->header.stamp;
-        output_msg.header.frame_id = target_frame_;
-        pointcloud_pub_->publish(output_msg);
-
-        auto end_time = std::chrono::steady_clock::now();
-        auto processing_time = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
-        RCLCPP_INFO(this->get_logger(), "Processed point cloud in %ld ms.", processing_time);
-
-        if (!ransac_success_ || box_detection_counter_ > 2) // box_found
-        {
-            RCLCPP_INFO(this->get_logger(), "Resetting subscriber.");
-            pointcloud_sub_.reset();
-        }
     }
 
     void PointCloudProcessor::preprocessPointCloud(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud, bool is_table)
@@ -458,17 +355,6 @@ namespace pointcloud_processing
         extract_cluster.setIndices(cluster_indices_ptr);
         extract_cluster.setNegative(false);
         extract_cluster.filter(*cluster_cloud);
-
-        if (cluster_cloud->points.size() == 0)
-        {
-            RCLCPP_WARN(this->get_logger(), "Cluster has no points for plane segmentation.");
-            // ransac_success_ = true;
-            voxel_grid_leaf_size_ /= 2.0;
-            min_plane_inliers_ *= 2;
-            min_cluster_size_ *= 2;
-            max_cluster_size_ *= 2;
-            return false;
-        }
 
         // Segment planes in the cluster
         pcl::SACSegmentation<pcl::PointXYZRGB> seg;
