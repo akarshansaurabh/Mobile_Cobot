@@ -37,6 +37,8 @@
 #include "custom_interfaces/msg/table_vertices.hpp"
 #include "pc_processing/octomap_generator.hpp"
 
+#include <future>
+
 using namespace std;
 
 namespace pointcloud_processing

@@ -66,7 +66,7 @@ namespace arm_planner
         static std::condition_variable cv;
         static bool callback_triggered;
 
-        pcl::PointCloud<pcl::PointXYZRGB>::Ptr accumulated_cloud_;
+        // pcl::PointCloud<pcl::PointXYZRGB>::Ptr accumulated_cloud_;
     };
 }
 

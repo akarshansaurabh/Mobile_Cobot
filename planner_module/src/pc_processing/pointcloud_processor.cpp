@@ -148,11 +148,6 @@ namespace pointcloud_processing
     void PointCloudProcessor::Server6DPoseCallback(const std::shared_ptr<custom_interfaces::srv::BoxposeEstimator::Request> request,
                                                    std::shared_ptr<custom_interfaces::srv::BoxposeEstimator::Response> response)
     {
-        // Example processing: print the size of table_vertices and delta
-        RCLCPP_INFO(this->get_logger(), "Number of table vertices: %zu", request->table_vertices.size());
-        RCLCPP_INFO(this->get_logger(), "Delta value: %f", request->delta);
-        RCLCPP_INFO(this->get_logger(), "Received PointCloud2 with width: %u, height: %u", request->cloud.width, request->cloud.height);
-
         auto pcl_cloud = std::make_shared<pcl::PointCloud<pcl::PointXYZRGB>>();
         pcl::fromROSMsg(request->cloud, *pcl_cloud);
 
@@ -171,7 +166,7 @@ namespace pointcloud_processing
             return;
         }
 
-        // // // Extract clusters
+        // Extract clusters
         std::vector<pcl::PointIndices> cluster_indices;
         min_cluster_size_ = 5;
         max_cluster_size_ = 1000;
@@ -180,36 +175,59 @@ namespace pointcloud_processing
         min_cluster_size_ = 50;
         max_cluster_size_ = 1000;
         cluster_tolerance_ = 0.07;
-        // // Identify top faces
+
+        // Identify top faces
         bool box_found = false;
         pcl::PointCloud<pcl::PointXYZRGB>::Ptr top_faces(new pcl::PointCloud<pcl::PointXYZRGB>());
         std::vector<geometry_msgs::msg::Pose> box_poses;
+        box_poses.reserve(cluster_indices.size());
         geometry_msgs::msg::Pose box_pose;
+        std::vector<std::future<std::tuple<bool, geometry_msgs::msg::Pose, pcl::PointCloud<pcl::PointXYZRGB>::Ptr>>> futures;
 
-        for (const auto &indices : cluster_indices)
-            if (identifyTopFace(indices, pcl_cloud, top_faces, box_pose))
+        for (auto indices : cluster_indices)
+        {
+            futures.push_back(std::async(std::launch::async, [this, pcl_cloud, indices]()
+                                         {
+            geometry_msgs::msg::Pose box_pose;
+            pcl::PointCloud<pcl::PointXYZRGB>::Ptr local_top_faces(new pcl::PointCloud<pcl::PointXYZRGB>());
+
+            bool found = identifyTopFace(indices, pcl_cloud, local_top_faces, box_pose);
+            return std::make_tuple(found, box_pose, local_top_faces); }));
+        }
+
+        for (auto &fut : futures)
+        {
+            // Wait for the thread to finish and get the result
+            auto result = fut.get();
+            bool found = std::get<0>(result);
+            geometry_msgs::msg::Pose pose = std::get<1>(result);
+            pcl::PointCloud<pcl::PointXYZRGB>::Ptr local_top_faces = std::get<2>(result);
+
+            if (found)
             {
                 box_found = true;
-                box_poses.push_back(std::move(box_pose));
+                box_poses.push_back(pose);
+                *top_faces += *local_top_faces;
             }
+        }
 
         if (box_found)
         {
             RCLCPP_INFO(this->get_logger(), "Box found in the point cloud.");
             pcl_cloud.swap(top_faces);
             vis_manager_->publishMarkerArray(box_poses);
+
+            // Publish the processed point cloud
+            sensor_msgs::msg::PointCloud2 output_msg;
+            pcl::toROSMsg(*pcl_cloud, output_msg);
+            output_msg.header.stamp = request->cloud.header.stamp;
+            output_msg.header.frame_id = target_frame_;
+            pointcloud_pub_->publish(output_msg);
         }
         else
         {
             RCLCPP_WARN(this->get_logger(), "Box not found in the point cloud.");
         }
-
-        // Publish the processed point cloud
-        sensor_msgs::msg::PointCloud2 output_msg;
-        pcl::toROSMsg(*pcl_cloud, output_msg);
-        output_msg.header.stamp = request->cloud.header.stamp;
-        output_msg.header.frame_id = target_frame_;
-        pointcloud_pub_->publish(output_msg);
     }
 
     void PointCloudProcessor::preprocessPointCloud(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud, bool is_table)

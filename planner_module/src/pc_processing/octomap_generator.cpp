@@ -79,6 +79,7 @@ namespace octoMapGenerator
             octomap.header.stamp = node_->now();
             octomap.header.frame_id = map_frame_;
             octomap_pub_->publish(octomap);
+            accumulated_cloud_->points.clear();
             SendRequestFor6DPoseEstimation(octoMapGenerator::table_vertices_, 0.1, octomap);
         }
 
