@@ -25,10 +25,6 @@ namespace octoMapGenerator
             "/arm_rgbd_camera/points", rclcpp::QoS(10),
             std::bind(&PointCloudStitcher::pointCloudSnapShotCallback, this, std::placeholders::_1));
 
-        // table_vertices_sub_ = node_->create_subscription<custom_interfaces::msg::TableVertices>(
-        //     "/table_vertices_topic", rclcpp::QoS(10),
-        //     std::bind(&PointCloudStitcher::TableVerticesCallback, this, std::placeholders::_1));
-
         box6dposes_client_ = node_->create_client<custom_interfaces::srv::BoxposeEstimator>("six_d_pose_estimate_service");
     }
 

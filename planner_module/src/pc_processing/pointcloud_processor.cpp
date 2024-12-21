@@ -38,8 +38,6 @@ namespace pointcloud_processing
             "/arm_rgbd_camera/processed_pc", rclcpp::QoS(10));
         move_amr_pub_ = this->create_publisher<geometry_msgs::msg::Vector3>(
             "/move_amr_topic", rclcpp::QoS(10));
-        table_vertices_pub_ = this->create_publisher<custom_interfaces::msg::TableVertices>(
-            "/table_vertices_topic", rclcpp::QoS(10));
 
         box6dposes_server_ = this->create_service<custom_interfaces::srv::BoxposeEstimator>(
             "six_d_pose_estimate_service",
@@ -51,7 +49,7 @@ namespace pointcloud_processing
 
         way_point_generator_ = std::make_shared<waypointGen::TableWayPointGen>();
 
-        arm_controller_param_client_ = std::make_shared<rclcpp::AsyncParametersClient>(this, "custom_arm_controller_node");
+        nav2_actionclient_param_client_ = std::make_shared<rclcpp::AsyncParametersClient>(this, "nav2_client3_node");
     }
 
     void PointCloudProcessor::initialize()
@@ -107,17 +105,17 @@ namespace pointcloud_processing
         return result;
     }
 
-    void PointCloudProcessor::ActivateArm_ForSnapshot()
+    void PointCloudProcessor::ResendTableAsDestination()
     {
-        if (!arm_controller_param_client_->wait_for_service(10s))
+        if (!nav2_actionclient_param_client_->wait_for_service(10s))
         {
-            RCLCPP_ERROR(this->get_logger(), "arm_pose_name parameter service not available.");
+            RCLCPP_ERROR(this->get_logger(), "destination parameter service not available.");
             return;
         }
 
         // vector of params of target node that i want to change
-        std::vector<rclcpp::Parameter> params = {rclcpp::Parameter("arm_pose_name", "c1")};
-        auto future = arm_controller_param_client_->set_parameters(params);
+        std::vector<rclcpp::Parameter> params = {rclcpp::Parameter("destination", "table_A")};
+        auto future = nav2_actionclient_param_client_->set_parameters(params);
 
         std::thread([this, future = std::move(future), params]() mutable
                     {
@@ -181,9 +179,8 @@ namespace pointcloud_processing
         pcl::PointCloud<pcl::PointXYZRGB>::Ptr top_faces(new pcl::PointCloud<pcl::PointXYZRGB>());
         std::vector<geometry_msgs::msg::Pose> box_poses;
         box_poses.reserve(cluster_indices.size());
-        geometry_msgs::msg::Pose box_pose;
-        std::vector<std::future<std::tuple<bool, geometry_msgs::msg::Pose, pcl::PointCloud<pcl::PointXYZRGB>::Ptr>>> futures;
 
+        std::vector<std::future<std::tuple<bool, geometry_msgs::msg::Pose, pcl::PointCloud<pcl::PointXYZRGB>::Ptr>>> futures;
         for (auto indices : cluster_indices)
         {
             futures.push_back(std::async(std::launch::async, [this, pcl_cloud, indices]()
@@ -191,10 +188,11 @@ namespace pointcloud_processing
             geometry_msgs::msg::Pose box_pose;
             pcl::PointCloud<pcl::PointXYZRGB>::Ptr local_top_faces(new pcl::PointCloud<pcl::PointXYZRGB>());
 
-            bool found = identifyTopFace(indices, pcl_cloud, local_top_faces, box_pose);
+            // bool found = identifyTopFace(indices, pcl_cloud, local_top_faces, box_pose);
+            bool found = ComputeBox6DPose(indices, pcl_cloud, local_top_faces, box_pose);
+            
             return std::make_tuple(found, box_pose, local_top_faces); }));
         }
-
         for (auto &fut : futures)
         {
             // Wait for the thread to finish and get the result
@@ -295,14 +293,15 @@ namespace pointcloud_processing
         geometry_msgs::msg::PointStamped local_point_min, local_point_max, global_point_min, global_point_max;
 
         Eigen::Vector4f min_point(min_x, min_y, table_vertices[0].z + 0.05, 1.0f);
-        Eigen::Vector4f max_point(max_x - 0.07, max_y, table_vertices[0].z + 0.5, 1.0f);
+        Eigen::Vector4f max_point(max_x - 0.07, max_y, table_vertices[0].z + 0.3, 1.0f);
 
         crop_filter.setMin(min_point);
         crop_filter.setMax(max_point);
         crop_filter.filter(*cloud);
     }
 
-    void PointCloudProcessor::removePlanes(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud)
+    // not in use
+    void PointCloudProcessor::removeNormalPlanes(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud)
     {
         // Remove dominant planes iteratively (floor, walls, table)
         pcl::SACSegmentation<pcl::PointXYZRGB> seg;
@@ -318,8 +317,6 @@ namespace pointcloud_processing
             pcl::PointIndices::Ptr inliers(new pcl::PointIndices);
             seg.setInputCloud(cloud);
             seg.segment(*inliers, *coefficients);
-            std::cout << "number of points in plane = " << inliers->indices.size() << std::endl;
-            std::cout << "min_plane_inliers_ = " << min_plane_inliers_ << std::endl;
             if (inliers->indices.size() < static_cast<size_t>(min_plane_inliers_))
                 break;
 
@@ -327,11 +324,10 @@ namespace pointcloud_processing
             Eigen::Vector3f plane_normal(coefficients->values[0], coefficients->values[1], coefficients->values[2]);
             plane_normal.normalize();
 
-            // Determine plane type based on normal
-            bool is_horizontal = (fabs(plane_normal.dot(Eigen::Vector3f(0, 0, 1))) > 0.95);
+            // Determine mormal planes
             bool is_vertical = (fabs(plane_normal.dot(Eigen::Vector3f(1, 0, 0))) > 0.95) || (fabs(plane_normal.dot(Eigen::Vector3f(0, 1, 0))) > 0.95);
 
-            if (is_horizontal || is_vertical)
+            if (is_vertical)
             {
                 // Remove the plane from the point cloud
                 extract.setInputCloud(cloud);
@@ -362,130 +358,6 @@ namespace pointcloud_processing
         std::cout << "___________________________________" << std::endl;
     }
 
-    bool PointCloudProcessor::identifyTopFace(const pcl::PointIndices &cluster_indices, const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud,
-                                              pcl::PointCloud<pcl::PointXYZRGB>::Ptr &top_faces_cloud, geometry_msgs::msg::Pose &box_pose)
-    {
-        // Extract the cluster point cloud from the input cloud using the provided indices
-        pcl::PointCloud<pcl::PointXYZRGB>::Ptr cluster_cloud(new pcl::PointCloud<pcl::PointXYZRGB>());
-        pcl::ExtractIndices<pcl::PointXYZRGB> extract_cluster;
-        pcl::PointIndices::Ptr cluster_indices_ptr(new pcl::PointIndices(cluster_indices));
-        extract_cluster.setInputCloud(cloud);
-        extract_cluster.setIndices(cluster_indices_ptr);
-        extract_cluster.setNegative(false);
-        extract_cluster.filter(*cluster_cloud);
-
-        // Segment planes in the cluster
-        pcl::SACSegmentation<pcl::PointXYZRGB> seg;
-        pcl::ExtractIndices<pcl::PointXYZRGB> extract_plane;
-        seg.setOptimizeCoefficients(true);
-        seg.setModelType(pcl::SACMODEL_PLANE);
-        seg.setMethodType(pcl::SAC_RANSAC);
-        seg.setDistanceThreshold(plane_distance_threshold_);
-
-        // pcl::PointCloud<pcl::PointXYZRGB>::Ptr cluster_cloud_copy(new pcl::PointCloud<pcl::PointXYZRGB>(*cluster_cloud));
-        int num_planes_extracted = 0;
-
-        while (num_planes_extracted < 6)
-        {
-            pcl::ModelCoefficients::Ptr coefficients(new pcl::ModelCoefficients);
-            pcl::PointIndices::Ptr inliers(new pcl::PointIndices);
-            seg.setInputCloud(cluster_cloud);
-            std::cout << "number of points in the box = " << cluster_cloud->points.size() << std::endl;
-            RCLCPP_INFO(this->get_logger(), "RANSAC STARTED.");
-            seg.segment(*inliers, *coefficients);
-
-            if (inliers->indices.size() < 1)
-            {
-                RCLCPP_ERROR(this->get_logger(), "RANSAC FAILED BECAUSE OF LESS POINTS");
-                voxel_grid_leaf_size_ /= 2.0;
-                min_plane_inliers_ *= 2;
-                min_cluster_size_ *= 2;
-                max_cluster_size_ *= 2;
-                ransac_success_ = false;
-                break;
-            }
-            else
-            {
-                RCLCPP_INFO(this->get_logger(), "RANSAC SUCCESSFUL");
-            }
-
-            // Calculate plane normal
-            Eigen::Vector3f plane_normal(coefficients->values[0], coefficients->values[1], coefficients->values[2]);
-            plane_normal.normalize();
-
-            bool is_horizontal = (fabs(plane_normal.dot(Eigen::Vector3f(0, 0, 1))) > 0.95);
-
-            if (is_horizontal)
-            {
-                // Extract the plane points
-                pcl::PointCloud<pcl::PointXYZRGB>::Ptr horizontal_plane_cloud(new pcl::PointCloud<pcl::PointXYZRGB>());
-                extract_plane.setInputCloud(cluster_cloud);
-                extract_plane.setIndices(inliers);
-                extract_plane.setNegative(false);
-                extract_plane.filter(*horizontal_plane_cloud);
-
-                // Compute average Z value
-                double sum_z = 0.0;
-                for (const auto &point : horizontal_plane_cloud->points)
-                    sum_z += point.z;
-                double avg_z = sum_z / horizontal_plane_cloud->points.size();
-
-                // Define a range for top face (e.g., above 0.5m and below 2.0m)
-                if (avg_z > 0.5 && avg_z < 2.0)
-                {
-                    // Found the top face
-                    // Compute centroid and orientation
-                    Eigen::Vector4f centroid;
-                    pcl::compute3DCentroid(*horizontal_plane_cloud, centroid);
-
-                    Eigen::Matrix3f covariance;
-                    pcl::computeCovarianceMatrixNormalized(*horizontal_plane_cloud, centroid, covariance);
-
-                    // Eigen decomposition
-                    Eigen::SelfAdjointEigenSolver<Eigen::Matrix3f> eigen_solver(covariance, Eigen::ComputeEigenvectors);
-                    Eigen::Matrix3f eigen_vectors = eigen_solver.eigenvectors();
-
-                    // Ensure right-handed coordinate system
-                    Eigen::Vector3f normal = eigen_vectors.col(0);
-                    if (normal.dot(Eigen::Vector3f(0.0, 0.0, 1.0)) < 0)
-                        normal = -normal;
-
-                    Eigen::Vector3f axis1 = eigen_vectors.col(1);
-                    Eigen::Vector3f axis2 = normal.cross(axis1);
-
-                    // Construct rotation matrix
-                    Eigen::Matrix3f rotation;
-                    rotation.col(0) = axis1;
-                    rotation.col(1) = axis2;
-                    rotation.col(2) = normal;
-
-                    // Convert rotation matrix to quaternion
-                    Eigen::Quaternionf quat(rotation);
-
-                    // Fill box_pose
-                    box_pose.position.x = centroid[0];
-                    box_pose.position.y = centroid[1];
-                    box_pose.position.z = centroid[2];
-                    box_pose.orientation.x = quat.x();
-                    box_pose.orientation.y = quat.y();
-                    box_pose.orientation.z = quat.z();
-                    box_pose.orientation.w = quat.w();
-                    // break;
-                    *top_faces_cloud += *horizontal_plane_cloud;
-                    return true;
-                }
-            }
-
-            // Remove the plane points from the cluster_cloud_copy
-            extract_plane.setInputCloud(cluster_cloud);
-            extract_plane.setIndices(inliers);
-            extract_plane.setNegative(true);
-            extract_plane.filter(*cluster_cloud);
-            num_planes_extracted++;
-        }
-        return false;
-    }
-
     void PointCloudProcessor::pointCloudTableDetectionCallback(const sensor_msgs::msg::PointCloud2::ConstSharedPtr &msg)
     {
         table_detection_counter_++;
@@ -504,23 +376,10 @@ namespace pointcloud_processing
             return;
         }
 
-        // Filter points within ROI
-        // filterPointCloudInROI(pcl_cloud, msg->header);
-        // if (pcl_cloud->empty())
-        // {
-        //     RCLCPP_WARN(this->get_logger(), "No points remain after ROI filtering.");
-        //     return;
-        // }
-
         // Detect table
 
         if (tableIsPresent(pcl_cloud, table_vertices))
         {
-            custom_interfaces::msg::TableVertices vertices_msg;
-
-            for (const auto &vertex : table_vertices)
-                vertices_msg.vertices.push_back(vertex);
-            table_vertices_pub_->publish(vertices_msg);
             RCLCPP_INFO(this->get_logger(), "Table detected.");
             vis_manager_->publishTableVertices(table_vertices);
             // compute the distance and send it to client
@@ -546,7 +405,10 @@ namespace pointcloud_processing
             }
         }
         else
-            RCLCPP_WARN(this->get_logger(), "Table not found.");
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(7000));
+            ResendTableAsDestination();
+        }
 
         // Reset the subscriber after processing
         if (table_detection_counter_ == 1)
@@ -565,6 +427,8 @@ namespace pointcloud_processing
         seg.setMethodType(pcl::SAC_RANSAC);
         seg.setDistanceThreshold(plane_distance_threshold_);
 
+        double slicing_avg_height = 0.0;
+
         while (true)
         {
             if (cloud->points.empty())
@@ -575,8 +439,13 @@ namespace pointcloud_processing
             seg.setInputCloud(cloud);
             seg.segment(*inliers, *coefficients);
 
-            if (inliers->indices.size() < min_plane_inliers_)
+            if (inliers->indices.size() == 0)
                 return false;
+
+            if (inliers->indices.size() < min_plane_inliers_) // less than 800
+            {
+                return false;
+            }
 
             Eigen::Vector3f plane_normal(coefficients->values[0], coefficients->values[1], coefficients->values[2]);
             plane_normal.normalize();
@@ -628,5 +497,187 @@ namespace pointcloud_processing
                 return true;
             }
         }
+    }
+
+    // not in use
+    bool PointCloudProcessor::computeOBBForCluster(const pcl::PointIndices &cluster_indices,
+                                                   const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud,
+                                                   geometry_msgs::msg::Pose &box_pose)
+    {
+        // Extract cluster cloud
+        pcl::PointCloud<pcl::PointXYZRGB>::Ptr cluster_cloud(new pcl::PointCloud<pcl::PointXYZRGB>());
+        {
+            pcl::ExtractIndices<pcl::PointXYZRGB> extract_cluster;
+            pcl::PointIndices::Ptr cluster_indices_ptr(new pcl::PointIndices(cluster_indices));
+            extract_cluster.setInputCloud(cloud);
+            extract_cluster.setIndices(cluster_indices_ptr);
+            extract_cluster.setNegative(false);
+            extract_cluster.filter(*cluster_cloud);
+        }
+
+        if (cluster_cloud->empty())
+        {
+            return false;
+        }
+
+        pcl::MomentOfInertiaEstimation<pcl::PointXYZRGB> feature_extractor;
+        feature_extractor.setInputCloud(cluster_cloud);
+        feature_extractor.compute();
+
+        std::vector<float> moment_of_inertia;
+        std::vector<float> eccentricity;
+        pcl::PointXYZRGB min_point_AABB;
+        pcl::PointXYZRGB max_point_AABB;
+        pcl::PointXYZRGB min_point_OBB;
+        pcl::PointXYZRGB max_point_OBB;
+        Eigen::Matrix3f rotational_matrix_OBB;
+        pcl::PointXYZRGB position_OBB;
+
+        feature_extractor.getMomentOfInertia(moment_of_inertia);
+        feature_extractor.getEccentricity(eccentricity);
+        feature_extractor.getAABB(min_point_AABB, max_point_AABB);
+        feature_extractor.getOBB(min_point_OBB, max_point_OBB, position_OBB, rotational_matrix_OBB);
+
+        // Convert rotation matrix to quaternion
+        Eigen::Quaternionf quat(rotational_matrix_OBB);
+        Eigen::Vector3f box_up = rotational_matrix_OBB.col(2);
+        Eigen::Vector3f table_up(0.0, 0.0, 1.0);
+        Eigen::Quaternionf rotation_needed = Eigen::Quaternionf::FromTwoVectors(box_up, table_up);
+        Eigen::Quaternionf adjusted_quat = rotation_needed * quat;
+
+        // Fill box_pose
+        box_pose.position.x = position_OBB.x;
+        box_pose.position.y = position_OBB.y;
+        box_pose.position.z = position_OBB.z;
+        box_pose.orientation.x = adjusted_quat.x();
+        box_pose.orientation.y = adjusted_quat.y();
+        box_pose.orientation.z = adjusted_quat.z();
+        box_pose.orientation.w = adjusted_quat.w();
+
+        // We consider we always find a box. If you had a condition, you could check size or shape.
+        return true;
+    }
+
+    bool PointCloudProcessor::ComputeBox6DPose(const pcl::PointIndices &cluster_indices, const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud,
+                                               pcl::PointCloud<pcl::PointXYZRGB>::Ptr &top_faces_cloud, geometry_msgs::msg::Pose &box_pose)
+    {
+        // Extract the cluster point cloud from the input cloud using the provided indices
+        pcl::PointCloud<pcl::PointXYZRGB>::Ptr cluster_cloud(new pcl::PointCloud<pcl::PointXYZRGB>());
+        pcl::PointCloud<pcl::PointXYZRGB>::Ptr horizontal_plane_cloud(new pcl::PointCloud<pcl::PointXYZRGB>());
+        bool top_face_found = false, is_horizontal = false;
+        horizontal_plane_cloud->points.clear();
+        Eigen::Vector3f normal1(0.0, 0.0, 0.0), normal2(0.0, 0.0, 0.0);
+        Eigen::Vector4f centroid;
+
+        pcl::ExtractIndices<pcl::PointXYZRGB> extract_cluster;
+        pcl::PointIndices::Ptr cluster_indices_ptr(new pcl::PointIndices(cluster_indices));
+        extract_cluster.setInputCloud(cloud);
+        extract_cluster.setIndices(cluster_indices_ptr);
+        extract_cluster.setNegative(false);
+        extract_cluster.filter(*cluster_cloud);
+
+        // Segment planes in the cluster
+        pcl::SACSegmentation<pcl::PointXYZRGB> seg;
+        pcl::ExtractIndices<pcl::PointXYZRGB> extract_plane;
+        seg.setOptimizeCoefficients(true);
+        seg.setModelType(pcl::SACMODEL_PLANE);
+        seg.setMethodType(pcl::SAC_RANSAC);
+        seg.setDistanceThreshold(plane_distance_threshold_);
+
+        // pcl::PointCloud<pcl::PointXYZRGB>::Ptr cluster_cloud_copy(new pcl::PointCloud<pcl::PointXYZRGB>(*cluster_cloud));
+        int num_planes_extracted = 0;
+
+        while (num_planes_extracted < 6)
+        {
+            pcl::ModelCoefficients::Ptr coefficients(new pcl::ModelCoefficients);
+            pcl::PointIndices::Ptr inliers(new pcl::PointIndices);
+            seg.setInputCloud(cluster_cloud);
+            RCLCPP_INFO(this->get_logger(), "RANSAC STARTED.");
+            seg.segment(*inliers, *coefficients);
+
+            if (inliers->indices.size() == 0)
+            {
+                RCLCPP_ERROR(this->get_logger(), "RANSAC FAILED BECAUSE OF LESS POINTS");
+                break;
+            }
+            else
+            {
+                RCLCPP_INFO(this->get_logger(), "RANSAC SUCCESSFUL");
+            }
+
+            // Calculate plane normal
+            Eigen::Vector3f plane_normal(coefficients->values[0], coefficients->values[1], coefficients->values[2]);
+            plane_normal.normalize();
+
+            bool is_horizontal = (fabs(plane_normal.dot(Eigen::Vector3f(0, 0, 1))) > 0.95);
+
+            if (is_horizontal && !top_face_found)
+            {
+                is_horizontal = true;
+                // Extract the plane points
+                extract_plane.setInputCloud(cluster_cloud);
+                extract_plane.setIndices(inliers);
+                extract_plane.setNegative(false);
+                extract_plane.filter(*horizontal_plane_cloud);
+
+                // Compute average Z value
+                double sum_z = 0.0;
+                for (const auto &point : horizontal_plane_cloud->points)
+                    sum_z += point.z;
+                double avg_z = sum_z / horizontal_plane_cloud->points.size();
+
+                // Define a range for top face (e.g., above 0.5m and below 2.0m)
+                if (avg_z > 0.5 && avg_z < 2.0)
+                {
+                    top_face_found = true;
+                    normal1 = plane_normal;
+                    pcl::compute3DCentroid(*horizontal_plane_cloud, centroid);
+                    *top_faces_cloud += *horizontal_plane_cloud;
+                }
+            }
+
+            if (!is_horizontal)
+            {
+                // slant
+                if (normal2.norm() < 0.01)
+                {
+                    normal2 = plane_normal;
+                }
+            }
+            if (normal2.norm() > 0.01 && normal1.norm() > 0.01)
+            {
+                Eigen::Vector3f z_cap(0.0, 0.0, 1.0);
+                Eigen::Vector3f y_cap = normal1.cross(normal2);
+                y_cap.normalize();
+                Eigen::Vector3f x_cap = y_cap.cross(z_cap);
+                x_cap.normalize();
+
+                Eigen::Matrix3f rotation;
+                rotation.col(0) = x_cap;
+                rotation.col(1) = y_cap;
+                rotation.col(2) = z_cap;
+
+                // Convert rotation matrix to quaternion
+                Eigen::Quaternionf quat(rotation);
+
+                // Fill box_pose
+                box_pose.position.x = centroid[0];
+                box_pose.position.y = centroid[1];
+                box_pose.position.z = centroid[2];
+                box_pose.orientation.x = quat.x();
+                box_pose.orientation.y = quat.y();
+                box_pose.orientation.z = quat.z();
+                box_pose.orientation.w = quat.w();
+                return true;
+            }
+
+            // Remove the plane points from the cluster_cloud_copy
+            extract_plane.setInputCloud(cluster_cloud);
+            extract_plane.setIndices(inliers);
+            extract_plane.setNegative(true);
+            extract_plane.filter(*cluster_cloud);
+            num_planes_extracted++;
+        }
+        return false;
     }
 }

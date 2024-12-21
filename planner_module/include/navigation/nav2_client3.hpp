@@ -155,7 +155,7 @@ namespace custom_nav2_action_client2
 
         void ActivateCostmapParameters(bool activate);
         void SetNav2Parameters();
-        void ActivatePCProcessingParameters(const std::string &param);
+        // void ActivatePCProcessingParameters(const std::string &param);
 
         void SetInitialPose(const geometry_msgs::msg::PoseWithCovarianceStamped &initial_pose);
         geometry_msgs::msg::PoseStamped GetCurrentPose();
@@ -211,11 +211,7 @@ namespace custom_nav2_action_client2
 
         // After receiving both paths, decide which is shorter and send final nav_to_pose
         void DecideAndSendFinalGoal();
-        // pc processing activation
-        // rclcpp::Subscription<std_msgs::msg::String>::SharedPtr pc_processing_sub_;
-        // void pointCloudActivationCallback(const std_msgs::msg::String::ConstSharedPtr &msg);
     };
-
 }
 
 #endif

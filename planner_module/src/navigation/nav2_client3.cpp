@@ -591,6 +591,7 @@ namespace custom_nav2_action_client2
 
         if (std::find(doors_or_home.begin(), doors_or_home.end(), destination_) != doors_or_home.end())
         {
+            // destination is not table
             nav_to_pose.is_table_destination_ = false;
             nav_to_pose.SendGoal(destination_goal_);
         }

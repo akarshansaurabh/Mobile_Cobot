@@ -15,11 +15,14 @@
 #include <pcl/filters/voxel_grid.h>
 #include <pcl/filters/statistical_outlier_removal.h>
 #include <pcl/filters/crop_box.h>
+#include <pcl/filters/passthrough.h>
 #include <pcl/filters/extract_indices.h>
 #include <pcl/filters/project_inliers.h>
 
 #include <pcl/segmentation/sac_segmentation.h>
 #include <pcl/segmentation/extract_clusters.h>
+
+#include <pcl/features/moment_of_inertia_estimation.h>
 
 #include <pcl/common/centroid.h>
 #include <pcl/common/common.h>
@@ -63,12 +66,17 @@ namespace pointcloud_processing
         bool transformPointCloudToTargetFrame(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud, const std_msgs::msg::Header &header);
         void filterPointCloudInROI(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud, const std_msgs::msg::Header &header,
                                    const std::vector<geometry_msgs::msg::Point> &table_vertices, double min_x, double max_x, double min_y, double max_y);
-        void removePlanes(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud);
+        void removeNormalPlanes(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud);
         void extractClusters(const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud,
                              std::vector<pcl::PointIndices> &cluster_indices);
+        bool computeOBBForCluster(const pcl::PointIndices &cluster_indices,
+                                  const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud,
+                                  geometry_msgs::msg::Pose &box_pose);
         bool identifyTopFace(const pcl::PointIndices &cluster_indices, const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud,
                              pcl::PointCloud<pcl::PointXYZRGB>::Ptr &top_faces_cloud, geometry_msgs::msg::Pose &box_pose);
         bool tableIsPresent(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud, std::vector<geometry_msgs::msg::Point> &vertices);
+        bool ComputeBox6DPose(const pcl::PointIndices &cluster_indices, const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud,
+                              pcl::PointCloud<pcl::PointXYZRGB>::Ptr &top_faces_cloud, geometry_msgs::msg::Pose &box_pose);
 
         // Parameter callback
         rcl_interfaces::msg::SetParametersResult parameterCallback(const std::vector<rclcpp::Parameter> &parameters);
@@ -116,8 +124,9 @@ namespace pointcloud_processing
         std::shared_ptr<waypointGen::TableWayPointGen> way_point_generator_;
 
         // Parameter clients
-        rclcpp::AsyncParametersClient::SharedPtr arm_controller_param_client_;
-        void ActivateArm_ForSnapshot();
+        rclcpp::AsyncParametersClient::SharedPtr nav2_actionclient_param_client_;
+        // rclcpp::AsyncParametersClient::SharedPtr arm_controller_param_client_;
+        void ResendTableAsDestination();
     };
 }
 
