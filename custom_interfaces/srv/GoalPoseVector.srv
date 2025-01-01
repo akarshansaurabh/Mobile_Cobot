@@ -1,0 +1,3 @@
+geometry_msgs/PoseArray goal_poses_for_arm
+---
+bool reply

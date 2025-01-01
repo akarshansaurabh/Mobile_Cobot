@@ -24,12 +24,17 @@
 
 #include <pcl/features/moment_of_inertia_estimation.h>
 
+#include <pcl/sample_consensus/ransac.h>
+#include <pcl/sample_consensus/sac_model_line.h>
+#include <pcl/ModelCoefficients.h>
+
 #include <pcl/common/centroid.h>
 #include <pcl/common/common.h>
 #include <pcl/common/transforms.h>
 
 #include <Eigen/Dense>
 #include <geometry_msgs/msg/pose_stamped.hpp>
+#include <geometry_msgs/msg/pose_array.hpp>
 
 #include "visualizations/visualization_manager.hpp"
 
@@ -41,11 +46,19 @@
 #include "pc_processing/octomap_generator.hpp"
 
 #include <future>
+#include <limits>
 
 using namespace std;
 
 namespace pointcloud_processing
 {
+    struct LineSegment
+    {
+        Eigen::Vector3f start;
+        Eigen::Vector3f end;
+        float length;
+    };
+
     class PointCloudProcessor : public rclcpp::Node
     {
     public:
@@ -60,7 +73,6 @@ namespace pointcloud_processing
         void pointCloudTableDetectionCallback(const sensor_msgs::msg::PointCloud2::ConstSharedPtr &msg);
         void Server6DPoseCallback(const std::shared_ptr<custom_interfaces::srv::BoxposeEstimator::Request> request,
                                   std::shared_ptr<custom_interfaces::srv::BoxposeEstimator::Response> response);
-
         // Processing functions
         void preprocessPointCloud(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud, bool is_table);
         bool transformPointCloudToTargetFrame(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud, const std_msgs::msg::Header &header);
@@ -72,9 +84,7 @@ namespace pointcloud_processing
         bool computeOBBForCluster(const pcl::PointIndices &cluster_indices,
                                   const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud,
                                   geometry_msgs::msg::Pose &box_pose);
-        bool identifyTopFace(const pcl::PointIndices &cluster_indices, const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud,
-                             pcl::PointCloud<pcl::PointXYZRGB>::Ptr &top_faces_cloud, geometry_msgs::msg::Pose &box_pose);
-        bool tableIsPresent(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud, std::vector<geometry_msgs::msg::Point> &vertices);
+        bool tableIsPresent(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud, std::vector<geometry_msgs::msg::Point> &vertices, const rclcpp::Time &timestamp);
         bool ComputeBox6DPose(const pcl::PointIndices &cluster_indices, const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud,
                               pcl::PointCloud<pcl::PointXYZRGB>::Ptr &top_faces_cloud, geometry_msgs::msg::Pose &box_pose);
 
@@ -86,6 +96,7 @@ namespace pointcloud_processing
         rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr table_detection_sub_;
         rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pointcloud_pub_;
         rclcpp::Publisher<geometry_msgs::msg::Vector3>::SharedPtr move_amr_pub_;
+        rclcpp::Publisher<geometry_msgs::msg::PoseArray>::SharedPtr box_poses_pub;
         rclcpp::Publisher<custom_interfaces::msg::TableVertices>::SharedPtr table_vertices_pub_;
         rclcpp::Service<custom_interfaces::srv::BoxposeEstimator>::SharedPtr box6dposes_server_;
 

@@ -1,4 +1,3 @@
-geometry_msgs/Point[] table_vertices
 float64 delta
 sensor_msgs/PointCloud2 cloud
 ---

@@ -38,6 +38,8 @@ namespace pointcloud_processing
             "/arm_rgbd_camera/processed_pc", rclcpp::QoS(10));
         move_amr_pub_ = this->create_publisher<geometry_msgs::msg::Vector3>(
             "/move_amr_topic", rclcpp::QoS(10));
+        box_poses_pub = this->create_publisher<geometry_msgs::msg::PoseArray>(
+            "/box_poses_topic", rclcpp::QoS(10));
 
         box6dposes_server_ = this->create_service<custom_interfaces::srv::BoxposeEstimator>(
             "six_d_pose_estimate_service",
@@ -188,9 +190,7 @@ namespace pointcloud_processing
             geometry_msgs::msg::Pose box_pose;
             pcl::PointCloud<pcl::PointXYZRGB>::Ptr local_top_faces(new pcl::PointCloud<pcl::PointXYZRGB>());
 
-            // bool found = identifyTopFace(indices, pcl_cloud, local_top_faces, box_pose);
             bool found = ComputeBox6DPose(indices, pcl_cloud, local_top_faces, box_pose);
-            
             return std::make_tuple(found, box_pose, local_top_faces); }));
         }
         for (auto &fut : futures)
@@ -211,9 +211,14 @@ namespace pointcloud_processing
 
         if (box_found)
         {
+            geometry_msgs::msg::PoseArray box_poses_msg;
+            for (const auto &pose : box_poses)
+                box_poses_msg.poses.push_back(std::move(pose));
+            box_poses_pub->publish(box_poses_msg);
+
             RCLCPP_INFO(this->get_logger(), "Box found in the point cloud.");
             pcl_cloud.swap(top_faces);
-            vis_manager_->publishMarkerArray(box_poses);
+            // vis_manager_->publishMarkerArray(box_poses);
 
             // Publish the processed point cloud
             sensor_msgs::msg::PointCloud2 output_msg;
@@ -245,15 +250,13 @@ namespace pointcloud_processing
         if (is_table)
         { // remove undesired cluster
             std::vector<pcl::PointIndices> cluster_indices;
-            min_cluster_size_ = 1000;
+            min_cluster_size_ = 10000;
             max_cluster_size_ = 400000;
             cluster_tolerance_ = 0.1;
             extractClusters(cloud, cluster_indices);
             min_cluster_size_ = 50;
             max_cluster_size_ = 1000;
             cluster_tolerance_ = 0.07;
-            std::cout << "number of cluster for detection = " << cluster_indices.size() << std::endl;
-
             pcl::ExtractIndices<pcl::PointXYZRGB> extract_cluster;
             pcl::PointIndices::Ptr cluster_indices_ptr(new pcl::PointIndices(cluster_indices[0]));
             extract_cluster.setInputCloud(cloud);
@@ -289,8 +292,6 @@ namespace pointcloud_processing
         // Use CropBox filter
         pcl::CropBox<pcl::PointXYZRGB> crop_filter;
         crop_filter.setInputCloud(cloud);
-
-        geometry_msgs::msg::PointStamped local_point_min, local_point_max, global_point_min, global_point_max;
 
         Eigen::Vector4f min_point(min_x, min_y, table_vertices[0].z + 0.05, 1.0f);
         Eigen::Vector4f max_point(max_x - 0.07, max_y, table_vertices[0].z + 0.3, 1.0f);
@@ -378,7 +379,7 @@ namespace pointcloud_processing
 
         // Detect table
 
-        if (tableIsPresent(pcl_cloud, table_vertices))
+        if (tableIsPresent(pcl_cloud, table_vertices, msg->header.stamp))
         {
             RCLCPP_INFO(this->get_logger(), "Table detected.");
             vis_manager_->publishTableVertices(table_vertices);
@@ -415,9 +416,10 @@ namespace pointcloud_processing
             table_detection_sub_.reset();
     }
 
-    bool PointCloudProcessor::tableIsPresent(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud, std::vector<geometry_msgs::msg::Point> &vertices)
+    bool PointCloudProcessor::tableIsPresent(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud, std::vector<geometry_msgs::msg::Point> &vertices, const rclcpp::Time &timestamp)
     {
         vertices.clear();
+        pcl::PointCloud<pcl::PointXYZRGB>::Ptr input_cloud(new pcl::PointCloud<pcl::PointXYZRGB>(*cloud));
         pcl::ExtractIndices<pcl::PointXYZRGB> extract;
         extract.setKeepOrganized(false);
 
@@ -432,7 +434,9 @@ namespace pointcloud_processing
         while (true)
         {
             if (cloud->points.empty())
+            {
                 return false;
+            }
 
             pcl::ModelCoefficients::Ptr coefficients(new pcl::ModelCoefficients());
             pcl::PointIndices::Ptr inliers(new pcl::PointIndices());
@@ -440,7 +444,9 @@ namespace pointcloud_processing
             seg.segment(*inliers, *coefficients);
 
             if (inliers->indices.size() == 0)
+            {
                 return false;
+            }
 
             if (inliers->indices.size() < min_plane_inliers_) // less than 800
             {

@@ -30,8 +30,16 @@
 #include <eigen3/Eigen/Dense>
 #include <memory>
 #include <condition_variable>
+
 #include "custom_interfaces/srv/boxpose_estimator.hpp"
-#include "custom_interfaces/msg/table_vertices.hpp"
+#include "custom_interfaces/srv/goal_pose_vector.hpp"
+
+// OctoMap
+#include <octomap/octomap.h>
+#include <octomap/OcTree.h>
+
+#include "visualizations/visualization_manager.hpp"
+#include "planner_module/collision_free_planner.hpp"
 
 using namespace std;
 using namespace std::placeholders;
@@ -40,7 +48,6 @@ using namespace std::chrono_literals;
 namespace octoMapGenerator
 {
     extern pcl::PointCloud<pcl::PointXYZRGB>::Ptr accumulated_cloud_;
-    extern std::vector<geometry_msgs::msg::Point> table_vertices_;
 
     class PointCloudStitcher
     {
@@ -48,7 +55,6 @@ namespace octoMapGenerator
         PointCloudStitcher(rclcpp::Node::SharedPtr node, const std::string &map_frame, std::mutex &m,
                            std::condition_variable &cv, bool &callback_triggered_flag, bool stitch,
                            rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr octomap_pub___);
-        void SetVertices(const std::vector<geometry_msgs::msg::Point> table_vertices__);
 
     private:
         rclcpp::Node::SharedPtr node_;
@@ -63,12 +69,10 @@ namespace octoMapGenerator
         geometry_msgs::msg::TransformStamped map_to_camera_transform;
 
         rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr pointcloud_sub_;
-        rclcpp::Subscription<custom_interfaces::msg::TableVertices>::SharedPtr table_vertices_sub_;
         rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr octomap_pub_;
         rclcpp::Client<custom_interfaces::srv::BoxposeEstimator>::SharedPtr box6dposes_client_;
 
-        void SendRequestFor6DPoseEstimation(const std::vector<geometry_msgs::msg::Point> &table_vertices,
-                                            double delta, const sensor_msgs::msg::PointCloud2 &cloud);
+        void SendRequestFor6DPoseEstimation(double delta, const sensor_msgs::msg::PointCloud2 &cloud);
         void HandleResponse(rclcpp::Client<custom_interfaces::srv::BoxposeEstimator>::SharedFuture future);
 
         bool start_stiching;
@@ -83,7 +87,21 @@ namespace octoMapGenerator
         pcl::PointCloud<pcl::PointXYZRGB>::Ptr transformCloudToMap(const sensor_msgs::msg::PointCloud2 &msg);
         void addCloudSnapshot(const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &snapshot);
         void finalizeStitching(float leaf_size = 0.015f);
-        pcl::PointCloud<pcl::PointXYZRGB>::Ptr getStitchedCloud();
+    };
+
+    class OctoMapGenerator
+    {
+    private:
+        rclcpp::Node::SharedPtr node_;
+        std::shared_ptr<octomap::OcTree> octree_;
+        rclcpp::Service<custom_interfaces::srv::GoalPoseVector>::SharedPtr colision_free_planner_server_;
+
+        void ServerCallbackForColisionFreePlanning(const std::shared_ptr<custom_interfaces::srv::GoalPoseVector::Request> request,
+                                                   std::shared_ptr<custom_interfaces::srv::GoalPoseVector::Response> response);
+
+    public:
+        OctoMapGenerator(const rclcpp::Node::SharedPtr &node);
+        void buildOctomap(const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &pcl_cloud, double resolution = 0.02);
     };
 }
 

@@ -8,17 +8,12 @@ using namespace std::chrono_literals;
 
 namespace arm_planner
 {
-    std::vector<geometry_msgs::msg::Point> table_vertices_;
-
     ArmController::ArmController(const rclcpp::Node::SharedPtr &node) : node_(node)
     {
+        octoMap_generator_ = std::make_shared<octoMapGenerator::OctoMapGenerator>(node_);
         // Initialize Action Client
         joint_trajectory_action_client_ = rclcpp_action::create_client<FollowJointTrajectory>(
             node_, "/joint_trajectory_controller/follow_joint_trajectory");
-
-        table_vertices_sub_ = node_->create_subscription<custom_interfaces::msg::TableVertices>(
-            "/table_vertices_topic", rclcpp::QoS(10),
-            std::bind(&ArmController::TableVerticesCallback, this, std::placeholders::_1));
 
         // Wait for the action server to be available
         if (!joint_trajectory_action_client_->wait_for_action_server(30s))
@@ -39,6 +34,55 @@ namespace arm_planner
 
         octomap_pub_ = node_->create_publisher<sensor_msgs::msg::PointCloud2>(
             "/octomap_topic_", rclcpp::QoS(10));
+
+        box_poses_sub_ = node_->create_subscription<geometry_msgs::msg::PoseArray>(
+            "/box_poses_topic", rclcpp::QoS(10),
+            std::bind(&ArmController::BoxPosesCallBack, this, std::placeholders::_1));
+
+        colision_free_planner_client = node_->create_client<custom_interfaces::srv::GoalPoseVector>("colision_free_planner_service");
+
+        activate_arm_motion_planning_ = false;
+    }
+
+    void ArmController::SendRequestForColisionFreePlanning(const geometry_msgs::msg::PoseArray &box_poses)
+    {
+        if (!colision_free_planner_client->wait_for_service(5s)) // Wait for 5 second
+        {
+            RCLCPP_ERROR(node_->get_logger(), "Service 'colision_free_planner_service' not available.");
+            return;
+        }
+
+        auto request = std::make_shared<custom_interfaces::srv::GoalPoseVector::Request>();
+
+        request->goal_poses_for_arm = box_poses;
+        auto future = colision_free_planner_client->async_send_request(request, std::bind(&ArmController::HandleResponse, this, std::placeholders::_1));
+    }
+    void ArmController::HandleResponse(rclcpp::Client<custom_interfaces::srv::GoalPoseVector>::SharedFuture future)
+    {
+        auto result = future.get();
+        if (result->reply)
+        {
+            RCLCPP_INFO(node_->get_logger(), "Service call succeeded: ");
+        }
+        else
+        {
+            RCLCPP_WARN(node_->get_logger(), "Service call failed: ");
+        }
+    }
+
+    void ArmController::BoxPosesCallBack(const geometry_msgs::msg::PoseArray::ConstSharedPtr &box_poses_msg)
+    {
+        // print the poses when activate_arm_motion_planning_ is true;
+        if (!activate_arm_motion_planning_)
+        {
+            while (!activate_arm_motion_planning_)
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        /// service call
+        SendRequestForColisionFreePlanning(*box_poses_msg);
+        for (const auto &pose : box_poses_msg->poses)
+            std::cout << pose.position.x << " " << pose.position.y << " " << pose.position.y << " "
+                      << pose.orientation.x << " " << pose.orientation.y << " " << pose.orientation.y << " " << pose.orientation.w << std::endl;
     }
 
     // Method to create a joint trajectory
@@ -127,7 +171,6 @@ namespace arm_planner
                     {
                         auto stitcher = std::make_shared<octoMapGenerator::PointCloudStitcher>(node_, "map", m, cv, callback_triggered, 
                                                                                                       stitch, octomap_pub_);  //accumulated_cloud_
-                        stitcher->SetVertices(arm_planner::table_vertices_);
                         RCLCPP_INFO(node_->get_logger(), "Stitcher object created in separate thread, waiting for snapshots.");
 
                         // Wait until callback is triggered
@@ -166,7 +209,14 @@ namespace arm_planner
             {
                 triggerSnapshotForCurrentViewpoint(true);
                 proceedToNextViewpoint("nav_pose");
+                activate_arm_motion_ = true;
             }
+            else if (arm_goal_pose_name_ == "nav_pose")
+            {
+                activate_arm_motion_planning_ = true;
+                // update a ros2 param of
+            }
+
             break;
         case rclcpp_action::ResultCode::CANCELED:
             RCLCPP_INFO(node_->get_logger(), "Joint Trajectory Goal was canceled");
@@ -273,8 +323,4 @@ namespace arm_planner
         return result;
     }
 
-    void ArmController::TableVerticesCallback(const custom_interfaces::msg::TableVertices::ConstSharedPtr &table_msg)
-    {
-        table_vertices_ = table_msg->vertices;
-    }
 }

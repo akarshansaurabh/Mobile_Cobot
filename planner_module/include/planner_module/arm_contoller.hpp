@@ -16,7 +16,8 @@
 #include <yaml-cpp/yaml.h>
 
 #include "pc_processing/octomap_generator.hpp"
-#include "custom_interfaces/msg/table_vertices.hpp"
+
+#include "custom_interfaces/srv/goal_pose_vector.hpp"
 
 using namespace std;
 using namespace std::placeholders;
@@ -26,7 +27,6 @@ namespace arm_planner
 {
     using FollowJointTrajectory = control_msgs::action::FollowJointTrajectory;
     using GoalHandleFollowJointTrajectory = rclcpp_action::ClientGoalHandle<FollowJointTrajectory>;
-    extern std::vector<geometry_msgs::msg::Point> table_vertices_;
 
     class ArmController
     {
@@ -36,19 +36,26 @@ namespace arm_planner
 
     private:
         rclcpp::Node::SharedPtr node_;
+        std::shared_ptr<octoMapGenerator::OctoMapGenerator> octoMap_generator_;
+        std::atomic<bool> activate_arm_motion_planning_;
         GoalHandleFollowJointTrajectory::SharedPtr arm_goal_hangle_;
         std::string arm_goal_pose_name_, yaml_file_;
 
+        rclcpp::Subscription<geometry_msgs::msg::PoseArray>::SharedPtr box_poses_sub_;
+
+        rclcpp::Client<custom_interfaces::srv::GoalPoseVector>::SharedPtr colision_free_planner_client;
+        void SendRequestForColisionFreePlanning(const geometry_msgs::msg::PoseArray &box_poses);
+        void HandleResponse(rclcpp::Client<custom_interfaces::srv::GoalPoseVector>::SharedFuture future);
+
         rclcpp_action::Client<FollowJointTrajectory>::SharedPtr joint_trajectory_action_client_;
         rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr octomap_pub_;
-        rclcpp::Subscription<custom_interfaces::msg::TableVertices>::SharedPtr table_vertices_sub_;
 
         void proceedToNextViewpoint(std::string str);
         void triggerSnapshotForCurrentViewpoint(bool stitch);
-        void TableVerticesCallback(const custom_interfaces::msg::TableVertices::ConstSharedPtr &table_msg);
 
         // Methods
         void SendJointTrajectoryGoal(const trajectory_msgs::msg::JointTrajectory &trajectory);
+        void BoxPosesCallBack(const geometry_msgs::msg::PoseArray::ConstSharedPtr &box_poses_msg);
         trajectory_msgs::msg::JointTrajectory CreateJointTrajectory(const std::vector<double> &positions, double execution_time);
         vector<double> GetArmGoalPose(const std::string &filename, const std::string &pose_);
 
@@ -65,6 +72,7 @@ namespace arm_planner
         static std::mutex m;
         static std::condition_variable cv;
         static bool callback_triggered;
+        bool activate_arm_motion_;
 
         // pcl::PointCloud<pcl::PointXYZRGB>::Ptr accumulated_cloud_;
     };

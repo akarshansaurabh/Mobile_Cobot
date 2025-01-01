@@ -36,11 +36,18 @@ find_package(ruckig REQUIRED)
 find_package(kdl_parser REQUIRED)
 find_package(custom_interfaces REQUIRED)
 
+find_package(ompl REQUIRED)
+find_package(octomap REQUIRED)
+
 include_directories(include 
   ${YAML_CPP_INCLUDE_DIR} 
   ${PCL_INCLUDE_DIR}
   ${ruckig_INCLUDE_DIRS}
-  )
+  ${OCTOMAP_INCLUDE_DIRS}
+)
+include_directories(/usr/include/ompl-1.5)
+include_directories(/usr/include/eigen3)
+
 link_directories(${PCL_LIBRARY_DIR})
 add_definitions(${PCL_DEFINITIONS})
 
@@ -68,7 +75,8 @@ target_link_libraries(nav2_client3
 
 add_executable(pc_processing1 src/pc_processing/pointcloud_processor.cpp src/planner_module/waypoint_gen.cpp
                src/main/pc_processing_main1.cpp src/visualizations/visualization_manager.cpp
-               src/pc_processing/octomap_generator.cpp)
+               src/pc_processing/octomap_generator.cpp src/visualizations/visualization_manager.cpp
+               src/planner_module/collision_free_planner.cpp)
 ament_target_dependencies(pc_processing1
   rclcpp
   tf2_ros
@@ -86,15 +94,19 @@ ament_target_dependencies(pc_processing1
   tf2_geometry_msgs
   visualization_msgs
   custom_interfaces
+  ompl
+  octomap
 )
 target_link_libraries(pc_processing1
  ${PCL_LIBRARIES}
  yaml-cpp
+ ompl
+ ${OCTOMAP_LIBRARIES} 
 )
 
-
 add_executable(arm_client src/planner_module/arm_controller.cpp
-               src/main/arm_contoller_main.cpp src/pc_processing/octomap_generator.cpp)
+               src/main/arm_contoller_main.cpp src/pc_processing/octomap_generator.cpp
+               src/planner_module/collision_free_planner.cpp src/visualizations/visualization_manager.cpp)
 ament_target_dependencies(arm_client
   rclcpp
   yaml-cpp
@@ -114,10 +126,14 @@ ament_target_dependencies(arm_client
   tf2_geometry_msgs
   visualization_msgs
   custom_interfaces
+  ompl
+  octomap
 )
 target_link_libraries(arm_client
   yaml-cpp
   ${PCL_LIBRARIES}
+  ompl
+  ${OCTOMAP_LIBRARIES} 
 )
 
 add_executable(obstacle_monitoring src/obstacle/obstacle_monitoring.cpp
@@ -138,12 +154,23 @@ ament_target_dependencies(obstacle_monitoring
   tf2
 )
 
+add_executable(ompl_test_node
+  src/main/ompl_test_node.cpp
+)
+ament_target_dependencies(ompl_test_node
+  rclcpp
+)
+target_link_libraries(ompl_test_node
+  ompl
+  ${OCTOMAP_LIBRARIES} 
+)
 
 install(TARGETS
   pc_processing1
   arm_client
   nav2_client3
   obstacle_monitoring
+  ompl_test_node
   DESTINATION lib/${PROJECT_NAME}
 )
 

@@ -27,6 +27,7 @@ namespace custom_nav2_action_client2
             std::bind(&NavigateToPoseClient::MoveAMRCallBack, this, std::placeholders::_1));
 
         *detection_tracker_ = planner_correction::DetectionTracker::DETECT_NOTHING;
+        amr_correction_ = std::make_shared<planner_correction::AMRCorrection>(node_, detection_tracker_);
     }
 
     // amr approaches the table
@@ -42,11 +43,6 @@ namespace custom_nav2_action_client2
         is_table_destination_ = false;
         SendGoal(next_goal);
         // also run a parallel thread for the arm motion planner
-    }
-
-    void NavigateToPoseClient::initialize()
-    {
-        amr_correction_ = std::make_shared<planner_correction::AMRCorrection>(node_, detection_tracker_);
     }
 
     void NavigateToPoseClient::SendGoal(const ActionType::Goal &goal_msg)
@@ -140,9 +136,9 @@ namespace custom_nav2_action_client2
                 *detection_tracker_ = planner_correction::DetectionTracker::DETECT_TABLE;
             else
             {
-                *detection_tracker_ = planner_correction::DetectionTracker::DETECT_NOTHING;
-                // if (*detection_tracker_ == planner_correction::DetectionTracker::DETECT_TABLE)
-                //     *detection_tracker_ = planner_correction::DetectionTracker::DETECT_BOXES;
+                //
+                if (*detection_tracker_ == planner_correction::DetectionTracker::DETECT_TABLE)
+                    *detection_tracker_ = planner_correction::DetectionTracker::DETECT_BOXES;
             }
             amr_correction_->CorrectOrientation(is_table_destination_);
             break;

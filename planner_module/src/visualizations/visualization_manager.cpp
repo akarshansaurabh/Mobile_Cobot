@@ -44,13 +44,8 @@ namespace visualization
             z_vector.y = rot_matrix(1, 2);
             z_vector.z = rot_matrix(2, 2);
 
-            // X-axis (Red)
             visualizeVector(origin, x_vector, current_marker_id++, marker_array, 1.0f, 0.0f, 0.0f);
-
-            // Y-axis (Green)
             visualizeVector(origin, y_vector, current_marker_id++, marker_array, 0.0f, 1.0f, 0.0f);
-
-            // Z-axis (Blue)
             visualizeVector(origin, z_vector, current_marker_id++, marker_array, 0.0f, 0.0f, 1.0f);
         }
 
@@ -71,9 +66,9 @@ namespace visualization
 
         marker.points.resize(2);
         marker.points[0] = origin;
-        marker.points[1].x = origin.x + vector.x * 0.3;
-        marker.points[1].y = origin.y + vector.y * 0.3;
-        marker.points[1].z = origin.z + vector.z * 0.3;
+        marker.points[1].x = origin.x + vector.x * 0.03;
+        marker.points[1].y = origin.y + vector.y * 0.03;
+        marker.points[1].z = origin.z + vector.z * 0.03;
 
         marker.scale.x = 0.025f;
         marker.scale.y = 0.05f;
@@ -118,4 +113,78 @@ namespace visualization
         marker_pub_->publish(marker_array);
         RCLCPP_INFO(node_->get_logger(), "Published table vertices.");
     }
-} // namespace visualization
+
+    void VisualizationManager::publishPathWithOrientations(const std::vector<geometry_msgs::msg::Pose> &path)
+    {
+        if (path.empty())
+        {
+            RCLCPP_WARN(node_->get_logger(), "Empty path. Nothing to visualize.");
+            return;
+        }
+
+        visualization_msgs::msg::MarkerArray marker_array;
+
+        visualization_msgs::msg::Marker line_strip;
+        line_strip.header.frame_id = target_frame_;
+        line_strip.header.stamp = node_->now();
+        line_strip.ns = "path_line_strip";
+        line_strip.id = 100;
+        line_strip.type = visualization_msgs::msg::Marker::LINE_STRIP;
+        line_strip.action = visualization_msgs::msg::Marker::ADD;
+
+        for (auto &p : path)
+        {
+            geometry_msgs::msg::Point pt;
+            pt.x = p.position.x;
+            pt.y = p.position.y;
+            pt.z = p.position.z;
+            line_strip.points.push_back(pt);
+        }
+
+        line_strip.scale.x = 0.02f; // thickness of line
+        line_strip.color.r = 1.0f;
+        line_strip.color.g = 1.0f;
+        line_strip.color.b = 0.0f; // yellow
+        line_strip.color.a = 1.0f;
+
+        line_strip.lifetime = rclcpp::Duration(0, 0);
+        marker_array.markers.push_back(line_strip);
+
+        int marker_id = 101; // next marker ID
+        for (auto &pose : path)
+        {
+            // Convert pose.orientation to Eigen::Matrix3f
+            Eigen::Quaternionf quat(pose.orientation.w,
+                                    pose.orientation.x,
+                                    pose.orientation.y,
+                                    pose.orientation.z);
+            Eigen::Matrix3f rot_matrix = quat.toRotationMatrix();
+
+            geometry_msgs::msg::Point origin = pose.position;
+            // X-axis
+            geometry_msgs::msg::Vector3 x_vec;
+            x_vec.x = rot_matrix(0, 0);
+            x_vec.y = rot_matrix(1, 0);
+            x_vec.z = rot_matrix(2, 0);
+
+            // Y-axis
+            geometry_msgs::msg::Vector3 y_vec;
+            y_vec.x = rot_matrix(0, 1);
+            y_vec.y = rot_matrix(1, 1);
+            y_vec.z = rot_matrix(2, 1);
+
+            // Z-axis
+            geometry_msgs::msg::Vector3 z_vec;
+            z_vec.x = rot_matrix(0, 2);
+            z_vec.y = rot_matrix(1, 2);
+            z_vec.z = rot_matrix(2, 2);
+
+            visualizeVector(origin, x_vec, marker_id++, marker_array, 1.0f, 0.0f, 0.0f);
+            visualizeVector(origin, y_vec, marker_id++, marker_array, 0.0f, 1.0f, 0.0f);
+            visualizeVector(origin, z_vec, marker_id++, marker_array, 0.0f, 0.0f, 1.0f);
+        }
+
+        marker_pub_->publish(marker_array);
+        RCLCPP_INFO(node_->get_logger(), "Published path line strip and orientation frames.");
+    }
+} 

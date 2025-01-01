@@ -78,7 +78,11 @@ namespace planner_correction
                     if (publish_data)
                         ActivatePCProcessingParameters(detection);
                     else
-                        ActivateArm_ForSnapshot();
+                    {
+                        if (*detection_tracker_ == planner_correction::DetectionTracker::DETECT_BOXES)
+                            ActivateArm_ForSnapshot();
+                        *detection_tracker_ = planner_correction::DetectionTracker::DETECT_NOTHING;
+                    }
 
                     correction_timer_.reset();
                 }

@@ -67,7 +67,6 @@ namespace custom_nav2_action_client2
         using GoalHandle = rclcpp_action::ClientGoalHandle<ActionType>;
 
         explicit NavigateToPoseClient(rclcpp::Node::SharedPtr node, std::shared_ptr<planner_correction::DetectionTracker> detection_tracker__);
-        void initialize();
 
         void SendGoal(const ActionType::Goal &goal_msg);
         void CancelGoal();

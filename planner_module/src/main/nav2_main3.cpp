@@ -9,7 +9,6 @@ int main(int argc, char **argv)
     custom_nav2_action_client2::NavigateToPoseClient navigate_to_pose_client(node, pc_detection_tracker_);
     custom_nav2_action_client2::ComputePathToPoseClient path_to_pose_client(node);
     custom_nav2_action_client2::NavigateThroughPosesClient navigate_to_poses_client(node);
-    navigate_to_pose_client.initialize();
 
     custom_nav2_action_client2::Nav2Utilities nav2_utils(node, navigate_to_pose_client,
                                                          path_to_pose_client, navigate_to_poses_client);

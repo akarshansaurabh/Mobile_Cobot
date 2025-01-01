@@ -16,6 +16,7 @@ find_package(rosidl_default_generators REQUIRED)
 rosidl_generate_interfaces(${PROJECT_NAME}
 "msg/TableVertices.msg"
 "srv/BoxposeEstimator.srv"
+"srv/GoalPoseVector.srv"
 DEPENDENCIES std_msgs sensor_msgs geometry_msgs trajectory_msgs
 )
 
