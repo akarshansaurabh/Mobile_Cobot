@@ -8,9 +8,10 @@ using namespace std::chrono_literals;
 
 namespace arm_planner
 {
-    ArmController::ArmController(const rclcpp::Node::SharedPtr &node) : node_(node)
+    ArmController::ArmController(const rclcpp::Node::SharedPtr &node, const std::shared_ptr<cMRKinematics::ArmKinematicsSolver> &kinematics_solver)
+        : node_(node), kinematics_solver_(kinematics_solver)
     {
-        octoMap_generator_ = std::make_shared<octoMapGenerator::OctoMapGenerator>(node_);
+        octoMap_generator_ = std::make_shared<octoMapGenerator::OctoMapGenerator>(node_, kinematics_solver_);
         // Initialize Action Client
         joint_trajectory_action_client_ = rclcpp_action::create_client<FollowJointTrajectory>(
             node_, "/joint_trajectory_controller/follow_joint_trajectory");
@@ -42,6 +43,7 @@ namespace arm_planner
         colision_free_planner_client = node_->create_client<custom_interfaces::srv::GoalPoseVector>("colision_free_planner_service");
 
         activate_arm_motion_planning_ = false;
+        previous_c3_ = false;
     }
 
     void ArmController::SendRequestForColisionFreePlanning(const geometry_msgs::msg::PoseArray &box_poses)
@@ -62,6 +64,20 @@ namespace arm_planner
         auto result = future.get();
         if (result->reply)
         {
+            joint_states_vector_.resize(result->joint_states_vector.size());
+            for (int i = 1; i < result->joint_states_vector.size(); i++)
+            {
+                joint_states_vector_[i].push_back(result->joint_states_vector[i].data[0]);
+                joint_states_vector_[i].push_back(result->joint_states_vector[i].data[1]);
+                joint_states_vector_[i].push_back(result->joint_states_vector[i].data[2]);
+                joint_states_vector_[i].push_back(result->joint_states_vector[i].data[3]);
+                joint_states_vector_[i].push_back(result->joint_states_vector[i].data[4]);
+                joint_states_vector_[i].push_back(result->joint_states_vector[i].data[5]);
+                joint_states_vector_[i].push_back(result->joint_states_vector[i].data[6]);
+            }
+            auto next_joint_trajectory = CreateJointTrajectory(result->joint_states_vector[1].data, 3.0);
+            arm_goal_pose_name_ = "picking";
+            SendJointTrajectoryGoal(next_joint_trajectory);
             RCLCPP_INFO(node_->get_logger(), "Service call succeeded: ");
         }
         else
@@ -81,7 +97,7 @@ namespace arm_planner
         /// service call
         SendRequestForColisionFreePlanning(*box_poses_msg);
         for (const auto &pose : box_poses_msg->poses)
-            std::cout << pose.position.x << " " << pose.position.y << " " << pose.position.y << " "
+            std::cout << pose.position.x << " " << pose.position.y << " " << pose.position.z << " "
                       << pose.orientation.x << " " << pose.orientation.y << " " << pose.orientation.y << " " << pose.orientation.w << std::endl;
     }
 
@@ -147,6 +163,13 @@ namespace arm_planner
     void ArmController::JointTrajectoryFeedbackCallback(const GoalHandleFollowJointTrajectory::SharedPtr &goal_handle,
                                                         const std::shared_ptr<const FollowJointTrajectory::Feedback> feedback)
     {
+        cMRKinematics::state_info_.joint_states[0] = kinematics_solver_->initial_guess(0) = feedback->actual.positions[0];
+        cMRKinematics::state_info_.joint_states[1] = kinematics_solver_->initial_guess(1) = feedback->actual.positions[1];
+        cMRKinematics::state_info_.joint_states[2] = kinematics_solver_->initial_guess(2) = feedback->actual.positions[2];
+        cMRKinematics::state_info_.joint_states[3] = kinematics_solver_->initial_guess(3) = feedback->actual.positions[3];
+        cMRKinematics::state_info_.joint_states[4] = kinematics_solver_->initial_guess(4) = feedback->actual.positions[4];
+        cMRKinematics::state_info_.joint_states[5] = kinematics_solver_->initial_guess(5) = feedback->actual.positions[5];
+        cMRKinematics::state_info_.joint_states[6] = kinematics_solver_->initial_guess(6) = feedback->actual.positions[6];
     }
 
     void ArmController::proceedToNextViewpoint(std::string str)
@@ -199,24 +222,45 @@ namespace arm_planner
             {
                 triggerSnapshotForCurrentViewpoint(false);
                 proceedToNextViewpoint("c2");
+                previous_c3_ = false;
             }
             else if (arm_goal_pose_name_ == "c2")
             {
                 triggerSnapshotForCurrentViewpoint(false);
                 proceedToNextViewpoint("c3");
+                previous_c3_ = false;
             }
             else if (arm_goal_pose_name_ == "c3")
             {
                 triggerSnapshotForCurrentViewpoint(true);
                 proceedToNextViewpoint("nav_pose");
-                activate_arm_motion_ = true;
+                previous_c3_ = true;
             }
             else if (arm_goal_pose_name_ == "nav_pose")
             {
-                activate_arm_motion_planning_ = true;
-                // update a ros2 param of
+                if (previous_c3_)
+                    activate_arm_motion_planning_ = true;
+                previous_c3_ = false;
             }
+            else if (arm_goal_pose_name_ == "picking")
+            {
 
+                auto next_joint_trajectory = CreateJointTrajectory(joint_states_vector_[3], 10.0);
+                arm_goal_pose_name_ = "stop";
+                std::cout << joint_states_vector_[3][0] << std::endl;
+                std::cout << joint_states_vector_[3][0] << std::endl;
+                std::cout << joint_states_vector_[3][0] << std::endl;
+                std::cout << joint_states_vector_[3][0] << std::endl;
+                std::cout << joint_states_vector_[3][0] << std::endl;
+                std::cout << joint_states_vector_[3][0] << std::endl;
+                std::cout << joint_states_vector_[3][0] << std::endl;
+                std::cout << joint_states_vector_[3][0] << std::endl;
+
+                SendJointTrajectoryGoal(next_joint_trajectory);
+            }
+            else if (arm_goal_pose_name_ == "stop")
+            {
+            }
             break;
         case rclcpp_action::ResultCode::CANCELED:
             RCLCPP_INFO(node_->get_logger(), "Joint Trajectory Goal was canceled");

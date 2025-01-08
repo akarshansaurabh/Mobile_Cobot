@@ -66,13 +66,13 @@ namespace visualization
 
         marker.points.resize(2);
         marker.points[0] = origin;
-        marker.points[1].x = origin.x + vector.x * 0.03;
-        marker.points[1].y = origin.y + vector.y * 0.03;
-        marker.points[1].z = origin.z + vector.z * 0.03;
+        marker.points[1].x = origin.x + vector.x * 0.1;
+        marker.points[1].y = origin.y + vector.y * 0.1;
+        marker.points[1].z = origin.z + vector.z * 0.1;
 
-        marker.scale.x = 0.025f;
-        marker.scale.y = 0.05f;
-        marker.scale.z = 0.05f;
+        marker.scale.x = 0.0125f;
+        marker.scale.y = 0.025f;
+        marker.scale.z = 0.025f;
 
         marker.color.r = r;
         marker.color.g = g;

@@ -40,6 +40,8 @@
 
 #include "visualizations/visualization_manager.hpp"
 #include "planner_module/collision_free_planner.hpp"
+#include "planner_module/kinematics.hpp"
+#include "miscellaneous/conversion.hpp"
 
 using namespace std;
 using namespace std::placeholders;
@@ -48,6 +50,7 @@ using namespace std::chrono_literals;
 namespace octoMapGenerator
 {
     extern pcl::PointCloud<pcl::PointXYZRGB>::Ptr accumulated_cloud_;
+    extern geometry_msgs::msg::TransformStamped map_to_base_transform;
 
     class PointCloudStitcher
     {
@@ -96,11 +99,15 @@ namespace octoMapGenerator
         std::shared_ptr<octomap::OcTree> octree_;
         rclcpp::Service<custom_interfaces::srv::GoalPoseVector>::SharedPtr colision_free_planner_server_;
 
+        std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
+        std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
+        std::shared_ptr<cMRKinematics::ArmKinematicsSolver> kinematics_solver_;
+
         void ServerCallbackForColisionFreePlanning(const std::shared_ptr<custom_interfaces::srv::GoalPoseVector::Request> request,
                                                    std::shared_ptr<custom_interfaces::srv::GoalPoseVector::Response> response);
 
     public:
-        OctoMapGenerator(const rclcpp::Node::SharedPtr &node);
+        OctoMapGenerator(const rclcpp::Node::SharedPtr &node, const std::shared_ptr<cMRKinematics::ArmKinematicsSolver> &kinematics_solver);
         void buildOctomap(const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &pcl_cloud, double resolution = 0.02);
     };
 }

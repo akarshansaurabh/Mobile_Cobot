@@ -12,6 +12,9 @@
 #include "maths/commonmathssolver.hpp"
 #include <eigen3/Eigen/Dense>
 
+#include <geometry_msgs/msg/transform_stamped.hpp>
+#include <geometry_msgs/msg/pose.hpp>
+
 using namespace std;
 
 namespace Conversions
@@ -47,6 +50,38 @@ namespace Conversions
         T.block<3, 3>(0, 0) = CommonMathsSolver::OrientationNTransformaton::ComputeR(pair.second);
         T.block<4, 1>(0, 3) = pair.first;
         T.block<1, 3>(3, 0).setZero();
+        return T;
+    }
+
+    inline Eigen::Matrix4d TransformStamped_2Eigen(const geometry_msgs::msg::TransformStamped &transform_stamped)
+    {
+        Eigen::Matrix4d T;
+        Eigen::Quaterniond Q(transform_stamped.transform.rotation.w,
+                             transform_stamped.transform.rotation.x,
+                             transform_stamped.transform.rotation.y,
+                             transform_stamped.transform.rotation.z);
+        T.block<3, 3>(0, 0) = Q.toRotationMatrix();
+        T(0, 3) = transform_stamped.transform.translation.x;
+        T(1, 3) = transform_stamped.transform.translation.y;
+        T(2, 3) = transform_stamped.transform.translation.z;
+        T(3, 0) = T(3, 1) = T(3, 2) = 0.0;
+        T(3, 3) = 1.0;
+        return T;
+    }
+
+    inline Eigen::Matrix4d Pose_2Eigen(const geometry_msgs::msg::Pose &pose)
+    {
+        Eigen::Matrix4d T;
+        Eigen::Quaterniond Q(pose.orientation.w,
+                             pose.orientation.x,
+                             pose.orientation.y,
+                             pose.orientation.z);
+        T.block<3, 3>(0, 0) = Q.toRotationMatrix();
+        T(0, 3) = pose.position.x;
+        T(1, 3) = pose.position.y;
+        T(2, 3) = pose.position.z;
+        T(3, 0) = T(3, 1) = T(3, 2) = 0.0;
+        T(3, 3) = 1.0;
         return T;
     }
 }

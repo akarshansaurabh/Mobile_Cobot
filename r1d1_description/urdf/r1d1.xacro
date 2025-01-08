@@ -437,6 +437,17 @@
   <axis xyz="0.477624 0.616294 0.626144"/>
 </joint>
 
+<link name="ee_link">
+</link>
+
+<joint name="ee_joint" type="fixed">
+  <origin xyz="0.03 0.03 0.03" rpy="0.58 0.78 1.57"/>
+  <parent link="wrist3_Link_1"/>
+  <child link="ee_link"/>
+  <axis xyz="0 0 1"/>
+</joint>
+
+
 <!-- <joint name="fixed_gripper_joint" type="fixed">
   <origin xyz="0.02 0.024 0.022" rpy="-0.7 0.55 -0.03"/>
   <parent link="wrist3_Link_1"/>

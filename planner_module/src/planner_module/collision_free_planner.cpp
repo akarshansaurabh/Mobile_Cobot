@@ -8,45 +8,27 @@
 namespace collision_free_planning
 {
     CollisionFreePlanner::CollisionFreePlanner(const std::shared_ptr<rclcpp::Node> &node,
-                                               const std::shared_ptr<octomap::OcTree> &octree)
-        : node_(node), octree_(octree)
+                                               const std::shared_ptr<octomap::OcTree> &octree,
+                                               const std::shared_ptr<cMRKinematics::ArmKinematicsSolver> &kinematics_solver,
+                                               const geometry_msgs::msg::TransformStamped &map_to_base_transform)
+        : node_(node), octree_(octree), kinematics_solver_(kinematics_solver), map_to_base_transform_(map_to_base_transform)
     {
         tf_buffer_ = std::make_shared<tf2_ros::Buffer>(node_->get_clock());
         tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
 
         map_frame_ = "map";
-        end_effector_link_ = "wrist3_Link_1";
+        end_effector_link_ = "ee_link";
 
         // We'll introduce a parameter for unknown cells in octomap
-        node_->declare_parameter<bool>("treat_unknown_as_occupied", false);
-        node_->get_parameter<bool>("treat_unknown_as_occupied", treat_unknown_as_occupied_);
+        // node_->declare_parameter<bool>("treat_unknown_as_occupied", false);
+        // node_->get_parameter<bool>("treat_unknown_as_occupied", treat_unknown_as_occupied_);
+
+        // initFCL();
     }
 
-    // void CollisionFreePlanner::buildOctomap(const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &pcl_cloud,
-    //                                         double resolution)
-    // {
-    //     // Create an OcTree
-    //     octree_ = std::make_shared<octomap::OcTree>(resolution);
-
-    //     // Insert points
-    //     for (const auto &pt : pcl_cloud->points)
-    //     {
-    //         if (std::isfinite(pt.x) && std::isfinite(pt.y) && std::isfinite(pt.z))
-    //         {
-    //             octomap::point3d p(pt.x, pt.y, pt.z);
-    //             octree_->updateNode(p, true);
-    //         }
-    //     }
-    //     octree_->updateInnerOccupancy();
-
-    //     RCLCPP_INFO(node_->get_logger(),
-    //                 "[CollisionFreePlanner] OctoMap built: %zu pts, resolution=%.3f",
-    //                 pcl_cloud->size(), resolution);
-    // }
-
-    std::vector<geometry_msgs::msg::Pose> CollisionFreePlanner::planPath(const geometry_msgs::msg::Pose &box_top_face_pose)
+    std::vector<std::vector<double>> CollisionFreePlanner::planPath(const geometry_msgs::msg::Pose &box_top_face_pose)
     {
-        std::vector<geometry_msgs::msg::Pose> full_path;
+        std::vector<std::vector<double>> full_path;
         if (!octree_)
         {
             RCLCPP_ERROR(node_->get_logger(),
@@ -54,85 +36,155 @@ namespace collision_free_planning
             return full_path;
         }
 
-        geometry_msgs::msg::Pose current_ee_pose = getCurrentEndEffectorPose();
-
-        geometry_msgs::msg::Pose pre_grasp_pose = box_top_face_pose;
-        pre_grasp_pose.position.z += 0.10;
-
-        std::array<double, 3> start_pos{current_ee_pose.position.x,
-                                        current_ee_pose.position.y,
-                                        current_ee_pose.position.z};
-
-        std::array<double, 3> pre_grasp_pos{pre_grasp_pose.position.x,
-                                            pre_grasp_pose.position.y,
-                                            pre_grasp_pose.position.z};
-        auto path_to_pre = plan3D(start_pos, pre_grasp_pos);
-        auto poses_to_pre = statesToPath(path_to_pre);
-
-        std::array<double, 3> box_pos{box_top_face_pose.position.x,
-                                      box_top_face_pose.position.y,
-                                      box_top_face_pose.position.z};
-        auto path_to_box = plan3D(pre_grasp_pos, box_pos);
-        auto poses_to_box = statesToPath(path_to_box);
-
-        Eigen::Quaternionf q_start(current_ee_pose.orientation.w,
-                                   current_ee_pose.orientation.x,
-                                   current_ee_pose.orientation.y,
-                                   current_ee_pose.orientation.z);
-
-        Eigen::Quaternionf q_pre(pre_grasp_pose.orientation.w,
-                                 pre_grasp_pose.orientation.x,
-                                 pre_grasp_pose.orientation.y,
-                                 pre_grasp_pose.orientation.z);
-
-        Eigen::Quaternionf q_box(box_top_face_pose.orientation.w,
-                                 box_top_face_pose.orientation.x,
-                                 box_top_face_pose.orientation.y,
-                                 box_top_face_pose.orientation.z);
-
-        int n1 = static_cast<int>(poses_to_pre.size());
-        auto slerp1 = slerpOrientations(q_start, q_pre, n1);
-        for (int i = 0; i < n1; i++)
+        // Compute Grasp Pose in Base
+        geometry_msgs::msg::TransformStamped map_to_base_transform;
+        try
         {
-            poses_to_pre[i].orientation.x = slerp1[i].x();
-            poses_to_pre[i].orientation.y = slerp1[i].y();
-            poses_to_pre[i].orientation.z = slerp1[i].z();
-            poses_to_pre[i].orientation.w = slerp1[i].w();
+            map_to_base_transform = tf_buffer_->lookupTransform("map", "base_link", tf2::TimePointZero, tf2::durationFromSec(5.0));
+            std::cout << "base by ros " << map_to_base_transform.transform.translation.x << " "
+                      << map_to_base_transform.transform.translation.y << " "
+                      << map_to_base_transform.transform.translation.z << " "
+                      << map_to_base_transform.transform.rotation.x << " "
+                      << map_to_base_transform.transform.rotation.y << " "
+                      << map_to_base_transform.transform.rotation.z << " "
+                      << map_to_base_transform.transform.rotation.w << " " << std::endl;
         }
-
-        int n2 = static_cast<int>(poses_to_box.size());
-        auto slerp2 = slerpOrientations(q_pre, q_box, n2);
-        for (int i = 0; i < n2; i++)
+        catch (tf2::ExtrapolationException &ex)
         {
-            poses_to_box[i].orientation.x = slerp2[i].x();
-            poses_to_box[i].orientation.y = slerp2[i].y();
-            poses_to_box[i].orientation.z = slerp2[i].z();
-            poses_to_box[i].orientation.w = slerp2[i].w();
+            RCLCPP_WARN(node_->get_logger(),
+                        "TF extrapolation error.");
+            return full_path;
         }
+        Eigen::Matrix4d Tmapbase = Conversions::TransformStamped_2Eigen(map_to_base_transform_);
+        Eigen::Matrix4d Tmapbox = Conversions::Pose_2Eigen(box_top_face_pose);
+        Eigen::Matrix4d Tbasebox_grasp_pose = Tmapbase.inverse() * Tmapbox;
+        Eigen::Vector3d z_cap = -Tbasebox_grasp_pose.block<3, 1>(0, 2);
+        Eigen::Vector3d y_cap = Tbasebox_grasp_pose.block<3, 1>(0, 1);
+        Eigen::Vector3d x_cap = y_cap.cross(z_cap);
+        x_cap.normalize();
+        Tbasebox_grasp_pose.block<3, 1>(0, 0) = x_cap;
+        Tbasebox_grasp_pose.block<3, 1>(0, 1) = y_cap;
+        Tbasebox_grasp_pose.block<3, 1>(0, 2) = z_cap;
+        Eigen::Matrix4d pre_grasp_pose = Tbasebox_grasp_pose;
+        pre_grasp_pose(2, 3) += 0.10;
 
-        full_path.reserve(n1 + n2);
-        full_path.insert(full_path.end(), poses_to_pre.begin(), poses_to_pre.end());
-        full_path.insert(full_path.end(), poses_to_box.begin(), poses_to_box.end());
+        KDL::JntArray start_positions(7), pre_grasp_positions(7), grasp_positions(7);
+        start_positions(0) = cMRKinematics::state_info_.joint_states[0];
+        start_positions(1) = cMRKinematics::state_info_.joint_states[1];
+        start_positions(2) = cMRKinematics::state_info_.joint_states[2];
+        start_positions(3) = cMRKinematics::state_info_.joint_states[3];
+        start_positions(4) = cMRKinematics::state_info_.joint_states[4];
+        start_positions(5) = cMRKinematics::state_info_.joint_states[5];
+        start_positions(6) = cMRKinematics::state_info_.joint_states[6];
+        std::cout << "desired xyz " << pre_grasp_pose(0, 3) << " " << pre_grasp_pose(1, 3) << " " << pre_grasp_pose(2, 3) << " " << std::endl;
+        if (!kinematics_solver_->SolveIK(Conversions::Transform_2KDL(pre_grasp_pose)))
+        {
+            std::cout << "[pre_grasp_pose] IK NOT FOUND" << std::endl;
+            std::cout << "[pre_grasp_pose] IK NOT FOUND" << std::endl;
+            std::cout << "[pre_grasp_pose] IK NOT FOUND" << std::endl;
+            std::cout << "[pre_grasp_pose] IK NOT FOUND" << std::endl;
+            std::cout << "[pre_grasp_pose] IK NOT FOUND" << std::endl;
+            std::cout << "[pre_grasp_pose] IK NOT FOUND" << std::endl;
+            std::cout << "[pre_grasp_pose] IK NOT FOUND" << std::endl;
+            std::cout << "[pre_grasp_pose] IK NOT FOUND" << std::endl;
+            std::cout << "[pre_grasp_pose] IK NOT FOUND" << std::endl;
+            std::cout << "[pre_grasp_pose] IK NOT FOUND" << std::endl;
+            std::cout << "[pre_grasp_pose] IK NOT FOUND" << std::endl;
+            std::cout << "[pre_grasp_pose] IK NOT FOUND" << std::endl;
+            std::cout << "[pre_grasp_pose] IK NOT FOUND" << std::endl;
+            std::cout << "[pre_grasp_pose] IK NOT FOUND" << std::endl;
+            std::cout << "[pre_grasp_pose] IK NOT FOUND" << std::endl;
+            std::cout << "[pre_grasp_pose] IK NOT FOUND" << std::endl;
+            return full_path;
+        }
+        else
+        {
+            std::cout << "pre grasp " << kinematics_solver_->q(0) << " "
+                      << kinematics_solver_->q(1) << " "
+                      << kinematics_solver_->q(2) << " "
+                      << kinematics_solver_->q(3) << " "
+                      << kinematics_solver_->q(4) << " "
+                      << kinematics_solver_->q(5) << " "
+                      << kinematics_solver_->q(6) << " " << std::endl;
+        }
+        pre_grasp_positions = kinematics_solver_->q;
+        kinematics_solver_->SolveFK(pre_grasp_positions);
+
+        std::cout << "fk xyz " << kinematics_solver_->sixDpose.p.x() << " "
+                  << kinematics_solver_->sixDpose.p.y() << " "
+                  << kinematics_solver_->sixDpose.p.z() << " " << std::endl;
+        if (!kinematics_solver_->SolveIK(Conversions::Transform_2KDL(Tbasebox_grasp_pose)))
+        {
+            std::cout << "[grasp_pose] IK NOT FOUND" << std::endl;
+            std::cout << "[grasp_pose] IK NOT FOUND" << std::endl;
+            std::cout << "[grasp_pose] IK NOT FOUND" << std::endl;
+            std::cout << "[grasp_pose] IK NOT FOUND" << std::endl;
+            std::cout << "[grasp_pose] IK NOT FOUND" << std::endl;
+            std::cout << "[grasp_pose] IK NOT FOUND" << std::endl;
+            std::cout << "[grasp_pose] IK NOT FOUND" << std::endl;
+            std::cout << "[grasp_pose] IK NOT FOUND" << std::endl;
+            std::cout << "[grasp_pose] IK NOT FOUND" << std::endl;
+            std::cout << "[grasp_pose] IK NOT FOUND" << std::endl;
+            std::cout << "[grasp_pose] IK NOT FOUND" << std::endl;
+            std::cout << "[grasp_pose] IK NOT FOUND" << std::endl;
+            std::cout << "[grasp_pose] IK NOT FOUND" << std::endl;
+            std::cout << "[grasp_pose] IK NOT FOUND" << std::endl;
+            std::cout << "[grasp_pose] IK NOT FOUND" << std::endl;
+            return full_path;
+        }
+        else
+        {
+            std::cout << "grasp " << kinematics_solver_->q(0) << " "
+                      << kinematics_solver_->q(1) << " "
+                      << kinematics_solver_->q(2) << " "
+                      << kinematics_solver_->q(3) << " "
+                      << kinematics_solver_->q(4) << " "
+                      << kinematics_solver_->q(5) << " "
+                      << kinematics_solver_->q(6) << " " << std::endl;
+        }
+        grasp_positions = kinematics_solver_->q;
+        std::cout << " grasp " << grasp_positions(0) << " "
+                  << grasp_positions(1) << " "
+                  << grasp_positions(2) << " "
+                  << grasp_positions(3) << " "
+                  << grasp_positions(4) << " "
+                  << grasp_positions(5) << " "
+                  << grasp_positions(6) << " " << std::endl;
+        auto start_to_pregrasp = PlanInJointSpace(start_positions, pre_grasp_positions);
+        auto pregrasp_to_grasp = PlanInJointSpace(pre_grasp_positions, grasp_positions);
+        std::this_thread::sleep_for(std::chrono::milliseconds(250));
+        auto start_to_pregrasp_vector2D = StatesToPath(start_to_pregrasp);
+        std::cout << start_to_pregrasp_vector2D.size() << std::endl;
+        std::cout << start_to_pregrasp_vector2D[0].size() << std::endl;
+        std::cout << start_to_pregrasp_vector2D.size() << std::endl;
+        std::cout << start_to_pregrasp_vector2D[0].size() << std::endl;
+        auto pregrasp_to_grasp_vector2D = StatesToPath(pregrasp_to_grasp);
+        std::cout << pregrasp_to_grasp_vector2D.size() << std::endl;
+        std::cout << pregrasp_to_grasp_vector2D[0].size() << std::endl;
+        std::cout << pregrasp_to_grasp_vector2D.size() << std::endl;
+        std::cout << pregrasp_to_grasp_vector2D[0].size() << std::endl;
+        // full_path.reserve(start_to_pregrasp_vector2D.size() + pregrasp_to_grasp_vector2D.size());
+        full_path.insert(full_path.end(), start_to_pregrasp_vector2D.begin(), start_to_pregrasp_vector2D.end());
+        full_path.insert(full_path.end(), pregrasp_to_grasp_vector2D.begin(), pregrasp_to_grasp_vector2D.end());
+        std::cout << full_path.size() << std::endl;
+        std::cout << full_path.size() << std::endl;
+        std::cout << full_path.size() << std::endl;
+        std::cout << full_path.size() << std::endl;
+        std::cout << full_path.size() << std::endl;
+        for (int i = 0; i < full_path.size(); i++)
+        {
+            // std::cout << " path[" << i << "] " << full_path[i][0] << " "
+            //           << full_path[i][1] << " "
+            //           << full_path[i][2] << " "
+            //           << full_path[i][3] << " "
+            //           << full_path[i][4] << " "
+            //           << full_path[i][5] << " "
+            //           << full_path[i][6] << " " << std::endl;
+        }
 
         RCLCPP_INFO(node_->get_logger(),
                     "[CollisionFreePlanner] Path has %zu waypoints (first seg=%d, second seg=%d)",
-                    full_path.size(), n1, n2);
-        std::cout << "n1 = " << n1 << std::endl;
-        std::cout << "n1 = " << n1 << std::endl;
-        std::cout << "n1 = " << n1 << std::endl;
-        std::cout << "n1 = " << n1 << std::endl;
-        std::cout << "n1 = " << n1 << std::endl;
-        std::cout << "n1 = " << n1 << std::endl;
-        std::cout << "n1 = " << n1 << std::endl;
-        std::cout << "n2 = " << n2 << std::endl;
-        std::cout << "n2 = " << n2 << std::endl;
-        std::cout << "n2 = " << n2 << std::endl;
-        std::cout << "n2 = " << n2 << std::endl;
-        std::cout << "n2 = " << n2 << std::endl;
-        std::cout << "n2 = " << n2 << std::endl;
-        std::cout << "n2 = " << n2 << std::endl;
-        std::cout << "n2 = " << n2 << std::endl;
-        std::cout << "n2 = " << n2 << std::endl;
+                    full_path.size(), start_to_pregrasp_vector2D.size(), pregrasp_to_grasp_vector2D.size());
 
         return full_path;
     }
@@ -140,7 +192,6 @@ namespace collision_free_planning
     geometry_msgs::msg::Pose CollisionFreePlanner::getCurrentEndEffectorPose() const
     {
         geometry_msgs::msg::Pose ee_pose;
-        ee_pose.orientation.w = 1.0;
 
         if (!node_)
         {
@@ -168,8 +219,8 @@ namespace collision_free_planning
         return ee_pose;
     }
 
-    std::vector<ob::ScopedState<ob::RealVectorStateSpace>> CollisionFreePlanner::plan3D(const std::array<double, 3> &start,
-                                                                                        const std::array<double, 3> &goal)
+    std::vector<ob::ScopedState<ob::RealVectorStateSpace>> CollisionFreePlanner::PlanInJointSpace(const KDL::JntArray &start,
+                                                                                                  const KDL::JntArray &goal)
     {
         std::vector<ob::ScopedState<ob::RealVectorStateSpace>> solution;
 
@@ -181,15 +232,15 @@ namespace collision_free_planning
         }
 
         // 1) Create the RealVectorStateSpace
-        auto space = std::make_shared<ob::RealVectorStateSpace>(DIM_);
-        ob::RealVectorBounds bounds(DIM_);
-        // Hard-coded bounding box for demonstration
-        bounds.setLow(0, -2.0); // x in [-2, 2]
-        bounds.setHigh(0, 2.0);
-        bounds.setLow(1, -2.0); // y in [-2, 2]
-        bounds.setHigh(1, 2.0);
-        bounds.setLow(2, 0.0); // z in [0, 2]
-        bounds.setHigh(2, 2.0);
+        auto space = std::make_shared<ob::RealVectorStateSpace>(7);
+        ob::RealVectorBounds bounds(7);
+        bounds.setLow(0, -0.7);
+        bounds.setHigh(0, 0.5);
+        for (int i = 1; i < 7; i++)
+        {
+            bounds.setLow(i, -3.14);
+            bounds.setHigh(i, 3.14);
+        }
         space->setBounds(bounds);
 
         // 2) Setup SimpleSetup
@@ -204,14 +255,22 @@ namespace collision_free_planning
 
         // 4) Start & goal states
         ob::ScopedState<> start_state(space);
-        start_state->as<ob::RealVectorStateSpace::StateType>()->values[0] = start[0];
-        start_state->as<ob::RealVectorStateSpace::StateType>()->values[1] = start[1];
-        start_state->as<ob::RealVectorStateSpace::StateType>()->values[2] = start[2];
+        start_state->as<ob::RealVectorStateSpace::StateType>()->values[0] = start(0);
+        start_state->as<ob::RealVectorStateSpace::StateType>()->values[1] = start(1);
+        start_state->as<ob::RealVectorStateSpace::StateType>()->values[2] = start(2);
+        start_state->as<ob::RealVectorStateSpace::StateType>()->values[3] = start(3);
+        start_state->as<ob::RealVectorStateSpace::StateType>()->values[4] = start(4);
+        start_state->as<ob::RealVectorStateSpace::StateType>()->values[5] = start(5);
+        start_state->as<ob::RealVectorStateSpace::StateType>()->values[6] = start(6);
 
         ob::ScopedState<> goal_state(space);
-        goal_state->as<ob::RealVectorStateSpace::StateType>()->values[0] = goal[0];
-        goal_state->as<ob::RealVectorStateSpace::StateType>()->values[1] = goal[1];
-        goal_state->as<ob::RealVectorStateSpace::StateType>()->values[2] = goal[2];
+        goal_state->as<ob::RealVectorStateSpace::StateType>()->values[0] = goal(0);
+        goal_state->as<ob::RealVectorStateSpace::StateType>()->values[1] = goal(1);
+        goal_state->as<ob::RealVectorStateSpace::StateType>()->values[2] = goal(2);
+        goal_state->as<ob::RealVectorStateSpace::StateType>()->values[3] = goal(3);
+        goal_state->as<ob::RealVectorStateSpace::StateType>()->values[4] = goal(4);
+        goal_state->as<ob::RealVectorStateSpace::StateType>()->values[5] = goal(5);
+        goal_state->as<ob::RealVectorStateSpace::StateType>()->values[6] = goal(6);
 
         ss.setStartAndGoalStates(start_state, goal_state);
 
@@ -228,8 +287,15 @@ namespace collision_free_planning
             auto path_geometric = ss.getSolutionPath().as<og::PathGeometric>();
             for (std::size_t i = 0; i < path_geometric->getStateCount(); i++)
             {
-                ob::ScopedState<> s(space);
+                ob::ScopedState<ob::RealVectorStateSpace> s(space);
                 s = path_geometric->getState(i);
+                std::cout << "State " << i << " : ";
+                for (std::size_t j = 0; j < space->getDimension(); j++)
+                {
+                    double val = s->as<ompl::base::RealVectorStateSpace::StateType>()->values[j];
+                    std::cout << val << " ";
+                }
+                std::cout << std::endl;
                 solution.push_back(s);
             }
             RCLCPP_INFO(node_->get_logger(),
@@ -244,64 +310,36 @@ namespace collision_free_planning
         return solution;
     }
 
-    std::vector<geometry_msgs::msg::Pose> CollisionFreePlanner::statesToPath(const std::vector<ob::ScopedState<ob::RealVectorStateSpace>> &states) const
+    std::vector<std::vector<double>> CollisionFreePlanner::StatesToPath(
+        const std::vector<ob::ScopedState<ob::RealVectorStateSpace>> &states) const
     {
-        std::vector<geometry_msgs::msg::Pose> path;
-        path.reserve(states.size());
-        geometry_msgs::msg::Pose pose;
-        // identity orientation for now
-        pose.orientation.x = 0.0;
-        pose.orientation.y = 0.0;
-        pose.orientation.z = 0.0;
-        pose.orientation.w = 1.0;
+        std::vector<std::vector<double>> vector_of_jointstates;
+        vector_of_jointstates.reserve(states.size());
+
+        // Create a 7-element vector:
+        std::vector<double> jointstates(7);
 
         for (auto &st : states)
         {
-            pose.position.x = st->as<ob::RealVectorStateSpace::StateType>()->values[0];
-            pose.position.y = st->as<ob::RealVectorStateSpace::StateType>()->values[1];
-            pose.position.z = st->as<ob::RealVectorStateSpace::StateType>()->values[2];
+            jointstates[0] = st->as<ob::RealVectorStateSpace::StateType>()->values[0];
+            jointstates[1] = st->as<ob::RealVectorStateSpace::StateType>()->values[1];
+            jointstates[2] = st->as<ob::RealVectorStateSpace::StateType>()->values[2];
+            jointstates[3] = st->as<ob::RealVectorStateSpace::StateType>()->values[3];
+            jointstates[4] = st->as<ob::RealVectorStateSpace::StateType>()->values[4];
+            jointstates[5] = st->as<ob::RealVectorStateSpace::StateType>()->values[5];
+            jointstates[6] = st->as<ob::RealVectorStateSpace::StateType>()->values[6];
 
-            path.push_back(pose);
+            // Push the 7-element vector into the 2D vector
+            vector_of_jointstates.push_back(jointstates);
         }
-        return path;
+
+        return vector_of_jointstates;
     }
 
     bool CollisionFreePlanner::isStateValid(const ob::State *state) const
     {
-        if (!octree_)
-        {
-            // No map => not valid
-            return false;
-        }
 
-        const auto *reals = state->as<ob::RealVectorStateSpace::StateType>();
-        double x = reals->values[0];
-        double y = reals->values[1];
-        double z = reals->values[2];
-
-        if (x < -2.0 || x > 2.0 || y < -2.0 || y > 2.0 || z < 0.0 || z > 2.0)
-            return false;
-
-        // 3) Check occupancy from OctoMap
-        octomap::point3d query(static_cast<float>(x), static_cast<float>(y), static_cast<float>(z));
-        octomap::OcTreeNode *node = octree_->search(query);
-
-        if (!node)
-        {
-            // **Unknown space** encountered
-            // "Policy" question: treat unknown as free or occupied?
-            //   - If we are conservative, we treat unknown as occupied => return false
-            //   - If we are aggressive, we treat unknown as free => return true
-            // Here, we do what the parameter says:
-            return (!treat_unknown_as_occupied_);
-        }
-        else
-        {
-            if (octree_->isNodeOccupied(node))
-                return false;
-            else
-                return true;
-        }
+        return true;
     }
 
     std::vector<Eigen::Quaternionf> CollisionFreePlanner::slerpOrientations(const Eigen::Quaternionf &start_q,
@@ -313,6 +351,7 @@ namespace collision_free_planning
 
         if (n <= 0)
         {
+            quaternions.clear();
             return quaternions;
         }
         else if (n == 1)

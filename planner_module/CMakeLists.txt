@@ -38,6 +38,9 @@ find_package(custom_interfaces REQUIRED)
 
 find_package(ompl REQUIRED)
 find_package(octomap REQUIRED)
+find_package(fcl REQUIRED)
+find_package(ccd REQUIRED)
+find_package(assimp REQUIRED)
 
 include_directories(include 
   ${YAML_CPP_INCLUDE_DIR} 
@@ -67,6 +70,7 @@ ament_target_dependencies(nav2_client3
   builtin_interfaces
   tf2_geometry_msgs
   tf2_sensor_msgs
+  kdl_parser
 )
 target_link_libraries(nav2_client3
   yaml-cpp
@@ -76,7 +80,8 @@ target_link_libraries(nav2_client3
 add_executable(pc_processing1 src/pc_processing/pointcloud_processor.cpp src/planner_module/waypoint_gen.cpp
                src/main/pc_processing_main1.cpp src/visualizations/visualization_manager.cpp
                src/pc_processing/octomap_generator.cpp src/visualizations/visualization_manager.cpp
-               src/planner_module/collision_free_planner.cpp)
+               src/planner_module/collision_free_planner.cpp src/planner_module/kinematics.cpp
+               src/maths/curves.cpp src/maths/commonmathssolver.cpp)
 ament_target_dependencies(pc_processing1
   rclcpp
   tf2_ros
@@ -95,18 +100,26 @@ ament_target_dependencies(pc_processing1
   visualization_msgs
   custom_interfaces
   ompl
+  fcl
+  ccd
   octomap
+  assimp
+  kdl_parser
 )
 target_link_libraries(pc_processing1
  ${PCL_LIBRARIES}
  yaml-cpp
  ompl
+ fcl
+ ccd
  ${OCTOMAP_LIBRARIES} 
+ assimp
 )
 
-add_executable(arm_client src/planner_module/arm_controller.cpp
+add_executable(arm_client src/planner_module/arm_controller.cpp src/planner_module/kinematics.cpp
                src/main/arm_contoller_main.cpp src/pc_processing/octomap_generator.cpp
-               src/planner_module/collision_free_planner.cpp src/visualizations/visualization_manager.cpp)
+               src/planner_module/collision_free_planner.cpp src/visualizations/visualization_manager.cpp
+               src/maths/curves.cpp src/maths/commonmathssolver.cpp)
 ament_target_dependencies(arm_client
   rclcpp
   yaml-cpp
@@ -128,12 +141,19 @@ ament_target_dependencies(arm_client
   custom_interfaces
   ompl
   octomap
+  fcl
+  ccd
+  assimp
+  kdl_parser
 )
 target_link_libraries(arm_client
   yaml-cpp
   ${PCL_LIBRARIES}
   ompl
   ${OCTOMAP_LIBRARIES} 
+  fcl
+  ccd
+  assimp
 )
 
 add_executable(obstacle_monitoring src/obstacle/obstacle_monitoring.cpp

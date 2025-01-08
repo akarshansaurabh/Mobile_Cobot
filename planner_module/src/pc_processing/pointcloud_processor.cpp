@@ -218,7 +218,7 @@ namespace pointcloud_processing
 
             RCLCPP_INFO(this->get_logger(), "Box found in the point cloud.");
             pcl_cloud.swap(top_faces);
-            // vis_manager_->publishMarkerArray(box_poses);
+            vis_manager_->publishMarkerArray(box_poses);
 
             // Publish the processed point cloud
             sensor_msgs::msg::PointCloud2 output_msg;
@@ -248,7 +248,7 @@ namespace pointcloud_processing
         sor_filter.filter(*cloud);
 
         if (is_table)
-        { // remove undesired cluster
+        {
             std::vector<pcl::PointIndices> cluster_indices;
             min_cluster_size_ = 10000;
             max_cluster_size_ = 400000;
@@ -615,11 +615,11 @@ namespace pointcloud_processing
             Eigen::Vector3f plane_normal(coefficients->values[0], coefficients->values[1], coefficients->values[2]);
             plane_normal.normalize();
 
-            bool is_horizontal = (fabs(plane_normal.dot(Eigen::Vector3f(0, 0, 1))) > 0.95);
+            is_horizontal = (fabs(plane_normal.dot(Eigen::Vector3f(0, 0, 1))) > 0.95);
 
             if (is_horizontal && !top_face_found)
             {
-                is_horizontal = true;
+                // is_horizontal = true;
                 // Extract the plane points
                 extract_plane.setInputCloud(cluster_cloud);
                 extract_plane.setIndices(inliers);

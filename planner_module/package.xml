@@ -32,6 +32,9 @@
   <depend>visualization_msgs</depend>
   <depend>custom_interfaces</depend>
   <depend>ompl</depend>
+  <depend>assimp</depend>
+  <depend>fcl</depend>
+  <depend>ccd</depend>  
 
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>

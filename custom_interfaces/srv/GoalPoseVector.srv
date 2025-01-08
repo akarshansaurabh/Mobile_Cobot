@@ -1,3 +1,4 @@
 geometry_msgs/PoseArray goal_poses_for_arm
 ---
 bool reply
+std_msgs/Float64MultiArray[] joint_states_vector

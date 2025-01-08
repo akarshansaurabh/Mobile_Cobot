@@ -26,7 +26,19 @@
 #include <octomap/octomap.h>
 #include <octomap/OcTree.h>
 
+// fcl
+#include <fcl/fcl.h>
+#include <fcl/geometry/bvh/BVH_model.h>
+#include <fcl/narrowphase/collision.h>
+
+#include <assimp/Importer.hpp>
+#include <assimp/scene.h>
+#include <assimp/postprocess.h>
+
 #include <Eigen/Dense>
+
+#include "planner_module/kinematics.hpp"
+#include "miscellaneous/conversion.hpp"
 
 namespace ob = ompl::base;
 namespace og = ompl::geometric;
@@ -40,15 +52,14 @@ namespace collision_free_planning
     {
     public:
         explicit CollisionFreePlanner(const std::shared_ptr<rclcpp::Node> &node,
-                                      const std::shared_ptr<octomap::OcTree> &octree);
+                                      const std::shared_ptr<octomap::OcTree> &octree,
+                                      const std::shared_ptr<cMRKinematics::ArmKinematicsSolver> &kinematics_solver,
+                                      const geometry_msgs::msg::TransformStamped &map_to_base_transform);
         ~CollisionFreePlanner() = default;
-
-        // void buildOctomap(const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &pcl_cloud,
-        //                   double resolution = 0.02);
-        std::vector<geometry_msgs::msg::Pose> planPath(const geometry_msgs::msg::Pose &box_top_face_pose);
+        std::vector<std::vector<double>> planPath(const geometry_msgs::msg::Pose &box_top_face_pose);
 
     private:
-        static constexpr int DIM_ = 3;
+        static constexpr int DIM_ = 7;
 
         std::shared_ptr<rclcpp::Node> node_;
 
@@ -61,15 +72,21 @@ namespace collision_free_planning
         std::shared_ptr<octomap::OcTree> octree_;
         bool treat_unknown_as_occupied_;
 
+        std::shared_ptr<fcl::CollisionObjectf> environment_collision_;
+        std::vector<std::shared_ptr<fcl::CollisionObjectf>> link_collision_objects_;
+        std::shared_ptr<cMRKinematics::ArmKinematicsSolver> kinematics_solver_;
+        geometry_msgs::msg::TransformStamped map_to_base_transform_;
+
+    private:
         geometry_msgs::msg::Pose getCurrentEndEffectorPose() const;
-        std::vector<ob::ScopedState<ob::RealVectorStateSpace>> plan3D(const std::array<double, 3> &start, const std::array<double, 3> &goal);
-        std::vector<geometry_msgs::msg::Pose> statesToPath(const std::vector<ob::ScopedState<ob::RealVectorStateSpace>> &states) const;
+        std::vector<ob::ScopedState<ob::RealVectorStateSpace>> PlanInJointSpace(const KDL::JntArray &start,
+                                                                                const KDL::JntArray &goal);
+        std::vector<std::vector<double>> StatesToPath(const std::vector<ob::ScopedState<ob::RealVectorStateSpace>> &states) const;
         bool isStateValid(const ob::State *state) const;
         std::vector<Eigen::Quaternionf> slerpOrientations(const Eigen::Quaternionf &start_q,
                                                           const Eigen::Quaternionf &goal_q,
                                                           int n) const;
     };
-
 }
 
 #endif

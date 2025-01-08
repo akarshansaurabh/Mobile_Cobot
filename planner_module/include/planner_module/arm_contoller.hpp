@@ -16,6 +16,7 @@
 #include <yaml-cpp/yaml.h>
 
 #include "pc_processing/octomap_generator.hpp"
+#include "planner_module/kinematics.hpp"
 
 #include "custom_interfaces/srv/goal_pose_vector.hpp"
 
@@ -31,13 +32,16 @@ namespace arm_planner
     class ArmController
     {
     public:
-        ArmController(const rclcpp::Node::SharedPtr &node);
+        ArmController(const rclcpp::Node::SharedPtr &node, const std::shared_ptr<cMRKinematics::ArmKinematicsSolver> &kinematics_solver);
         ~ArmController() = default;
 
     private:
         rclcpp::Node::SharedPtr node_;
+
         std::shared_ptr<octoMapGenerator::OctoMapGenerator> octoMap_generator_;
-        std::atomic<bool> activate_arm_motion_planning_;
+        std::shared_ptr<cMRKinematics::ArmKinematicsSolver> kinematics_solver_;
+
+        std::atomic<bool> activate_arm_motion_planning_, previous_c3_;
         GoalHandleFollowJointTrajectory::SharedPtr arm_goal_hangle_;
         std::string arm_goal_pose_name_, yaml_file_;
 
@@ -73,6 +77,7 @@ namespace arm_planner
         static std::condition_variable cv;
         static bool callback_triggered;
         bool activate_arm_motion_;
+        std::vector<std::vector<double>> joint_states_vector_;
 
         // pcl::PointCloud<pcl::PointXYZRGB>::Ptr accumulated_cloud_;
     };

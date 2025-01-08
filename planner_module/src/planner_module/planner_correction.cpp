@@ -28,6 +28,13 @@ namespace planner_correction
                 geometry_msgs::msg::Twist cmd_vel;
                 cmd_vel.angular.z = 0.0;
                 cmd_vel_pub_->publish(cmd_vel);
+                std::cout << "base actual " << odom_msg_->pose.pose.position.x << " "
+                          << odom_msg_->pose.pose.position.y << " "
+                          << odom_msg_->pose.pose.position.z << " "
+                          << odom_msg_->pose.pose.orientation.x << " "
+                          << odom_msg_->pose.pose.orientation.y << " "
+                          << odom_msg_->pose.pose.orientation.z << " "
+                          << odom_msg_->pose.pose.orientation.w << " " << std::endl;
                 start_odometry_check = false;
                 correction_is_complete = true;
                 odometry_check_sub_.reset();

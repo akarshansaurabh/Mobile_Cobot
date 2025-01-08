@@ -1,8 +1,10 @@
 #include "pc_processing/octomap_generator.hpp"
+#include "std_msgs/msg/float64_multi_array.hpp"
 
 namespace octoMapGenerator
 {
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr accumulated_cloud_ = std::make_shared<pcl::PointCloud<pcl::PointXYZRGB>>();
+    geometry_msgs::msg::TransformStamped map_to_base_transform;
 
     PointCloudStitcher::PointCloudStitcher(rclcpp::Node::SharedPtr node, const std::string &map_frame, std::mutex &m,
                                            std::condition_variable &cv, bool &callback_triggered_flag, bool stitch,
@@ -44,6 +46,7 @@ namespace octoMapGenerator
                         cloud_time.seconds());
             return;
         }
+
         pcl::PointCloud<pcl::PointXYZRGB>::Ptr pcl_snapshot_in_map = transformCloudToMap(*snapshot_msg);
         addCloudSnapshot(pcl_snapshot_in_map);
 
@@ -55,7 +58,24 @@ namespace octoMapGenerator
             octomap.header.stamp = node_->now();
             octomap.header.frame_id = map_frame_;
             octomap_pub_->publish(octomap);
-            accumulated_cloud_->points.clear();
+            try
+            {
+                map_to_base_transform = tf_buffer_->lookupTransform("map", "base_link", cloud_time, tf2::durationFromSec(5.0));
+                std::cout << "base at the time of snapshot " << map_to_base_transform.transform.translation.x << " "
+                          << map_to_base_transform.transform.translation.y << " "
+                          << map_to_base_transform.transform.translation.z << " "
+                          << map_to_base_transform.transform.rotation.x << " "
+                          << map_to_base_transform.transform.rotation.y << " "
+                          << map_to_base_transform.transform.rotation.z << " "
+                          << map_to_base_transform.transform.rotation.w << " " << std::endl;
+            }
+            catch (tf2::ExtrapolationException &ex)
+            {
+                RCLCPP_WARN(node_->get_logger(),
+                            "No Base.",
+                            cloud_time.seconds());
+                return;
+            }
             SendRequestFor6DPoseEstimation(0.1, octomap);
         }
 
@@ -139,23 +159,35 @@ namespace octoMapGenerator
         }
     }
 
-    OctoMapGenerator::OctoMapGenerator(const rclcpp::Node::SharedPtr &node) : node_(node)
+    OctoMapGenerator::OctoMapGenerator(const rclcpp::Node::SharedPtr &node, const std::shared_ptr<cMRKinematics::ArmKinematicsSolver> &kinematics_solver)
+        : node_(node), kinematics_solver_(kinematics_solver)
     {
         colision_free_planner_server_ = node_->create_service<custom_interfaces::srv::GoalPoseVector>(
             "colision_free_planner_service", std::bind(&OctoMapGenerator::ServerCallbackForColisionFreePlanning,
                                                        this, std::placeholders::_1, std::placeholders::_2));
         octree_ = nullptr;
+
+        tf_buffer_ = std::make_shared<tf2_ros::Buffer>(node_->get_clock());
+        tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
     }
 
     void OctoMapGenerator::ServerCallbackForColisionFreePlanning(const std::shared_ptr<custom_interfaces::srv::GoalPoseVector::Request> request,
                                                                  std::shared_ptr<custom_interfaces::srv::GoalPoseVector::Response> response)
     {
         buildOctomap(accumulated_cloud_);
-        auto ompl_planner = std::make_unique<collision_free_planning::CollisionFreePlanner>(node_, octree_);
-        std::vector<geometry_msgs::msg::Pose> colision_free_path = ompl_planner->planPath(request->goal_poses_for_arm.poses[0]);
-        auto visualizer = std::make_unique<visualization::VisualizationManager>(node_);
-        visualizer->publishPathWithOrientations(colision_free_path);
+        auto ompl_planner = std::make_unique<collision_free_planning::CollisionFreePlanner>(node_, octree_, kinematics_solver_, map_to_base_transform);
+
+        std::vector<std::vector<double>> joint_states_vector = ompl_planner->planPath(request->goal_poses_for_arm.poses[0]);
+        // auto visualizer = std::make_unique<visualization::VisualizationManager>(node_);
+        // visualizer->publishPathWithOrientations(colision_free_path);
+        std_msgs::msg::Float64MultiArray float_array_msg;
+        for (const auto &joint_states : joint_states_vector)
+        {
+            float_array_msg.data = joint_states;
+            response->joint_states_vector.push_back(float_array_msg);
+        }
         response->reply = true;
+        accumulated_cloud_->points.clear();
     }
 
     void OctoMapGenerator::buildOctomap(const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &pcl_cloud, double resolution)

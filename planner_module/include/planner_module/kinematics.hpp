@@ -22,13 +22,13 @@ namespace cMRKinematics
 {
     struct StateInformation
     {
-        std::array<double, 6> joint_angles, xyz_rpy;
+        std::array<double, 7> joint_states;
         double t;
     };
 
     extern StateInformation state_info_;
 
-    class ArmKinematicsSolver : public rclcpp::Node
+    class ArmKinematicsSolver
     {
     private:
         int dof_num;
@@ -36,26 +36,28 @@ namespace cMRKinematics
         KDL::Chain chain_;
         std::string root_link_;
         std::string tip_link_;
-        KDL::Jacobian jacobian;
+        rclcpp::Node::SharedPtr node_;
+        // KDL::Jacobian jacobian;
 
-        double tolerance;
-        Eigen::Matrix<double, 6, 6> Jm;
+        // double tolerance;
+        // Eigen::Matrix<double, 6, 6> Jm;
 
         std::unique_ptr<KDL::ChainFkSolverPos_recursive> fk_solver_;
         std::unique_ptr<KDL::ChainIkSolverPos_LMA> ik_solver_;
-        std::unique_ptr<KDL::ChainJntToJacSolver> jacobian_solver_;
+        // std::unique_ptr<KDL::ChainJntToJacSolver> jacobian_solver_;
 
         bool SolveIKIntermediate(const KDL::Frame &end_effector_pose);
 
     public:
         KDL::Frame sixDpose;
-        KDL::JntArray initial_guess, q, q_home;
-        Eigen::Matrix4d pose_6_wrt_0;
-        ArmKinematicsSolver(const std::string &urdf_param, const std::string &root_link, const std::string &tip_link);
+        KDL::JntArray initial_guess, q;
+        // Eigen::Matrix4d pose_6_wrt_0;
+        ArmKinematicsSolver(const rclcpp::Node::SharedPtr &node, const std::string &urdf_param,
+                            const std::string &root_link, const std::string &tip_link);
         int GetDOF();
         void SolveFK(const KDL::JntArray &joint_positions);
         bool SolveIK(const KDL::Frame &target_pose);
-        bool SingularityExists(const KDL::JntArray &joint_positions);
+        // bool SingularityExists(const KDL::JntArray &joint_positions);
     };
 }
 
