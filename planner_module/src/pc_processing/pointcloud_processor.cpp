@@ -619,7 +619,6 @@ namespace pointcloud_processing
 
             if (is_horizontal && !top_face_found)
             {
-                // is_horizontal = true;
                 // Extract the plane points
                 extract_plane.setInputCloud(cluster_cloud);
                 extract_plane.setIndices(inliers);

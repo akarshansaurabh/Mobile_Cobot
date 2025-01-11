@@ -1,4 +1,5 @@
 #include "planner_module/arm_contoller.hpp"
+#include "planner_module/multithreaded_fcl_loader.hpp"
 
 using namespace arm_planner;
 
@@ -10,10 +11,11 @@ int main(int argc, char **argv)
     std::string root_link = "base_link";
     std::string tip_link = "ee_link";
     auto kinematics_solver = std::make_shared<cMRKinematics::ArmKinematicsSolver>(node, urdf, root_link, tip_link);
-    arm_planner::ArmController action_client_obj(node, kinematics_solver);
+    auto fcl_ = std::make_shared<multi_fcl_loader::MultiThreadedFCLLoader>(node);
+    auto collision_objs = fcl_->buildFCLCollisionObjectsInParallel();
+    arm_planner::ArmController action_client_obj(node, kinematics_solver, collision_objs);
 
-    // Create a MultiThreadedExecutor with multiple threads (e.g., 4)
-    rclcpp::executors::MultiThreadedExecutor executor(rclcpp::ExecutorOptions(), 4);
+    rclcpp::executors::MultiThreadedExecutor executor(rclcpp::ExecutorOptions(), 12);
     executor.add_node(node);
     executor.spin();
     // rclcpp::spin(node);

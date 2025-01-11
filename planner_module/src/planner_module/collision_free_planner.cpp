@@ -41,13 +41,6 @@ namespace collision_free_planning
         try
         {
             map_to_base_transform = tf_buffer_->lookupTransform("map", "base_link", tf2::TimePointZero, tf2::durationFromSec(5.0));
-            std::cout << "base by ros " << map_to_base_transform.transform.translation.x << " "
-                      << map_to_base_transform.transform.translation.y << " "
-                      << map_to_base_transform.transform.translation.z << " "
-                      << map_to_base_transform.transform.rotation.x << " "
-                      << map_to_base_transform.transform.rotation.y << " "
-                      << map_to_base_transform.transform.rotation.z << " "
-                      << map_to_base_transform.transform.rotation.w << " " << std::endl;
         }
         catch (tf2::ExtrapolationException &ex)
         {
@@ -76,111 +69,30 @@ namespace collision_free_planning
         start_positions(4) = cMRKinematics::state_info_.joint_states[4];
         start_positions(5) = cMRKinematics::state_info_.joint_states[5];
         start_positions(6) = cMRKinematics::state_info_.joint_states[6];
-        std::cout << "desired xyz " << pre_grasp_pose(0, 3) << " " << pre_grasp_pose(1, 3) << " " << pre_grasp_pose(2, 3) << " " << std::endl;
+        // std::cout << "desired xyz " << pre_grasp_pose(0, 3) << " " << pre_grasp_pose(1, 3) << " " << pre_grasp_pose(2, 3) << " " << std::endl;
         if (!kinematics_solver_->SolveIK(Conversions::Transform_2KDL(pre_grasp_pose)))
         {
             std::cout << "[pre_grasp_pose] IK NOT FOUND" << std::endl;
-            std::cout << "[pre_grasp_pose] IK NOT FOUND" << std::endl;
-            std::cout << "[pre_grasp_pose] IK NOT FOUND" << std::endl;
-            std::cout << "[pre_grasp_pose] IK NOT FOUND" << std::endl;
-            std::cout << "[pre_grasp_pose] IK NOT FOUND" << std::endl;
-            std::cout << "[pre_grasp_pose] IK NOT FOUND" << std::endl;
-            std::cout << "[pre_grasp_pose] IK NOT FOUND" << std::endl;
-            std::cout << "[pre_grasp_pose] IK NOT FOUND" << std::endl;
-            std::cout << "[pre_grasp_pose] IK NOT FOUND" << std::endl;
-            std::cout << "[pre_grasp_pose] IK NOT FOUND" << std::endl;
-            std::cout << "[pre_grasp_pose] IK NOT FOUND" << std::endl;
-            std::cout << "[pre_grasp_pose] IK NOT FOUND" << std::endl;
-            std::cout << "[pre_grasp_pose] IK NOT FOUND" << std::endl;
-            std::cout << "[pre_grasp_pose] IK NOT FOUND" << std::endl;
-            std::cout << "[pre_grasp_pose] IK NOT FOUND" << std::endl;
-            std::cout << "[pre_grasp_pose] IK NOT FOUND" << std::endl;
             return full_path;
         }
-        else
-        {
-            std::cout << "pre grasp " << kinematics_solver_->q(0) << " "
-                      << kinematics_solver_->q(1) << " "
-                      << kinematics_solver_->q(2) << " "
-                      << kinematics_solver_->q(3) << " "
-                      << kinematics_solver_->q(4) << " "
-                      << kinematics_solver_->q(5) << " "
-                      << kinematics_solver_->q(6) << " " << std::endl;
-        }
-        pre_grasp_positions = kinematics_solver_->q;
-        kinematics_solver_->SolveFK(pre_grasp_positions);
 
-        std::cout << "fk xyz " << kinematics_solver_->sixDpose.p.x() << " "
-                  << kinematics_solver_->sixDpose.p.y() << " "
-                  << kinematics_solver_->sixDpose.p.z() << " " << std::endl;
+        pre_grasp_positions = kinematics_solver_->q;
+        // kinematics_solver_->SolveFK(pre_grasp_positions);
+
         if (!kinematics_solver_->SolveIK(Conversions::Transform_2KDL(Tbasebox_grasp_pose)))
         {
             std::cout << "[grasp_pose] IK NOT FOUND" << std::endl;
-            std::cout << "[grasp_pose] IK NOT FOUND" << std::endl;
-            std::cout << "[grasp_pose] IK NOT FOUND" << std::endl;
-            std::cout << "[grasp_pose] IK NOT FOUND" << std::endl;
-            std::cout << "[grasp_pose] IK NOT FOUND" << std::endl;
-            std::cout << "[grasp_pose] IK NOT FOUND" << std::endl;
-            std::cout << "[grasp_pose] IK NOT FOUND" << std::endl;
-            std::cout << "[grasp_pose] IK NOT FOUND" << std::endl;
-            std::cout << "[grasp_pose] IK NOT FOUND" << std::endl;
-            std::cout << "[grasp_pose] IK NOT FOUND" << std::endl;
-            std::cout << "[grasp_pose] IK NOT FOUND" << std::endl;
-            std::cout << "[grasp_pose] IK NOT FOUND" << std::endl;
-            std::cout << "[grasp_pose] IK NOT FOUND" << std::endl;
-            std::cout << "[grasp_pose] IK NOT FOUND" << std::endl;
-            std::cout << "[grasp_pose] IK NOT FOUND" << std::endl;
             return full_path;
         }
-        else
-        {
-            std::cout << "grasp " << kinematics_solver_->q(0) << " "
-                      << kinematics_solver_->q(1) << " "
-                      << kinematics_solver_->q(2) << " "
-                      << kinematics_solver_->q(3) << " "
-                      << kinematics_solver_->q(4) << " "
-                      << kinematics_solver_->q(5) << " "
-                      << kinematics_solver_->q(6) << " " << std::endl;
-        }
+
         grasp_positions = kinematics_solver_->q;
-        std::cout << " grasp " << grasp_positions(0) << " "
-                  << grasp_positions(1) << " "
-                  << grasp_positions(2) << " "
-                  << grasp_positions(3) << " "
-                  << grasp_positions(4) << " "
-                  << grasp_positions(5) << " "
-                  << grasp_positions(6) << " " << std::endl;
         auto start_to_pregrasp = PlanInJointSpace(start_positions, pre_grasp_positions);
         auto pregrasp_to_grasp = PlanInJointSpace(pre_grasp_positions, grasp_positions);
         std::this_thread::sleep_for(std::chrono::milliseconds(250));
         auto start_to_pregrasp_vector2D = StatesToPath(start_to_pregrasp);
-        std::cout << start_to_pregrasp_vector2D.size() << std::endl;
-        std::cout << start_to_pregrasp_vector2D[0].size() << std::endl;
-        std::cout << start_to_pregrasp_vector2D.size() << std::endl;
-        std::cout << start_to_pregrasp_vector2D[0].size() << std::endl;
         auto pregrasp_to_grasp_vector2D = StatesToPath(pregrasp_to_grasp);
-        std::cout << pregrasp_to_grasp_vector2D.size() << std::endl;
-        std::cout << pregrasp_to_grasp_vector2D[0].size() << std::endl;
-        std::cout << pregrasp_to_grasp_vector2D.size() << std::endl;
-        std::cout << pregrasp_to_grasp_vector2D[0].size() << std::endl;
-        // full_path.reserve(start_to_pregrasp_vector2D.size() + pregrasp_to_grasp_vector2D.size());
         full_path.insert(full_path.end(), start_to_pregrasp_vector2D.begin(), start_to_pregrasp_vector2D.end());
         full_path.insert(full_path.end(), pregrasp_to_grasp_vector2D.begin(), pregrasp_to_grasp_vector2D.end());
-        std::cout << full_path.size() << std::endl;
-        std::cout << full_path.size() << std::endl;
-        std::cout << full_path.size() << std::endl;
-        std::cout << full_path.size() << std::endl;
-        std::cout << full_path.size() << std::endl;
-        for (int i = 0; i < full_path.size(); i++)
-        {
-            // std::cout << " path[" << i << "] " << full_path[i][0] << " "
-            //           << full_path[i][1] << " "
-            //           << full_path[i][2] << " "
-            //           << full_path[i][3] << " "
-            //           << full_path[i][4] << " "
-            //           << full_path[i][5] << " "
-            //           << full_path[i][6] << " " << std::endl;
-        }
 
         RCLCPP_INFO(node_->get_logger(),
                     "[CollisionFreePlanner] Path has %zu waypoints (first seg=%d, second seg=%d)",

@@ -7,6 +7,7 @@
 #include <memory>
 #include <future>
 #include <iostream>
+#include <unordered_map>
 
 // Assimp
 #include <assimp/Importer.hpp>
@@ -18,17 +19,24 @@
 #include <fcl/geometry/bvh/BVH_model.h>
 #include <fcl/narrowphase/collision.h>
 
-// ROS 2 (optional, for logging via rclcpp::Node)
 #include <rclcpp/rclcpp.hpp>
+#include "visualizations/visualization_manager.hpp"
 
 namespace multi_fcl_loader
 {
+    struct LinkOffset
+    {
+        double x_off, y_off, z_off;
+        float roll_off, pitch_off, yaw_off;
+        int link_index;
+    };
+
     class MultiThreadedFCLLoader
     {
     public:
         explicit MultiThreadedFCLLoader(const std::shared_ptr<rclcpp::Node> &node = nullptr);
         std::vector<std::shared_ptr<fcl::CollisionObjectf>>
-        buildFCLCollisionObjectsInParallel(const std::vector<std::string> &link_mesh_paths);
+        buildFCLCollisionObjectsInParallel();
 
     private:
         bool loadMeshFromSTL(const std::string &path,
@@ -37,6 +45,8 @@ namespace multi_fcl_loader
 
     private:
         std::shared_ptr<rclcpp::Node> node_;
+        std::unordered_map<std::string, LinkOffset> link_offsets_;
+        std::shared_ptr<visualization::VisualizationManager> viz_manager_;
     };
 }
 

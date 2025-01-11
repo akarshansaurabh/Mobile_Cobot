@@ -84,6 +84,23 @@ namespace Conversions
         T(3, 3) = 1.0;
         return T;
     }
+
+    inline Eigen::Matrix3f KDL_2Rot(const KDL::Frame &kdl_frame)
+    {
+        Eigen::Matrix3f mat;
+        mat(0, 0) = static_cast<float>(kdl_frame.M(0, 0));
+        mat(0, 1) = static_cast<float>(kdl_frame.M(0, 1));
+        mat(0, 2) = static_cast<float>(kdl_frame.M(0, 2));
+
+        mat(1, 0) = static_cast<float>(kdl_frame.M(1, 0));
+        mat(1, 1) = static_cast<float>(kdl_frame.M(1, 1));
+        mat(1, 2) = static_cast<float>(kdl_frame.M(1, 2));
+
+        mat(2, 0) = static_cast<float>(kdl_frame.M(2, 0));
+        mat(2, 1) = static_cast<float>(kdl_frame.M(2, 1));
+        mat(2, 2) = static_cast<float>(kdl_frame.M(2, 2));
+        return mat;
+    }
 }
 
 #endif

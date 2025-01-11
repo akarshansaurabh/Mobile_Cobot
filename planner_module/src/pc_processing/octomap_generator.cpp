@@ -178,6 +178,7 @@ namespace octoMapGenerator
         auto ompl_planner = std::make_unique<collision_free_planning::CollisionFreePlanner>(node_, octree_, kinematics_solver_, map_to_base_transform);
 
         std::vector<std::vector<double>> joint_states_vector = ompl_planner->planPath(request->goal_poses_for_arm.poses[0]);
+        std::cout << "ompl planning done" << std::endl;
         // auto visualizer = std::make_unique<visualization::VisualizationManager>(node_);
         // visualizer->publishPathWithOrientations(colision_free_path);
         std_msgs::msg::Float64MultiArray float_array_msg;

@@ -119,7 +119,7 @@ target_link_libraries(pc_processing1
 add_executable(arm_client src/planner_module/arm_controller.cpp src/planner_module/kinematics.cpp
                src/main/arm_contoller_main.cpp src/pc_processing/octomap_generator.cpp
                src/planner_module/collision_free_planner.cpp src/visualizations/visualization_manager.cpp
-               src/maths/curves.cpp src/maths/commonmathssolver.cpp)
+               src/maths/curves.cpp src/maths/commonmathssolver.cpp src/planner_module/multithreaded_fcl_loader.cpp)
 ament_target_dependencies(arm_client
   rclcpp
   yaml-cpp

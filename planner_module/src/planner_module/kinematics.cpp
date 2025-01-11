@@ -22,7 +22,7 @@ namespace cMRKinematics
             RCLCPP_ERROR(node_->get_logger(), "Failed to get KDL Chain from tree");
 
         dof_num = chain_.getNrOfJoints();
-    
+
         q.resize(dof_num);
         // jacobian.resize(dof_num);
         initial_guess.resize(dof_num);
@@ -40,21 +40,7 @@ namespace cMRKinematics
         state_info_.joint_states[5] = initial_guess(5) = q(5) = 0.5;
         state_info_.joint_states[6] = initial_guess(5) = q(6) = -1.5;
 
-        // fk for home position -> rot_6_wrt_0 at home position
         SolveFK(initial_guess);
-        // for (int i = 0; i < 3; i++)
-        //     for (int j = 0; j < 3; j++)
-        //         pose_6_wrt_0(i, j) = sixDpose.M(i, j);
-        // state_info_.xyz_rpy[0] = pose_6_wrt_0(0, 3) = sixDpose.p.x();
-        // state_info_.xyz_rpy[1] = pose_6_wrt_0(1, 3) = sixDpose.p.y();
-        // state_info_.xyz_rpy[2] = pose_6_wrt_0(2, 3) = sixDpose.p.z();
-        // pose_6_wrt_0(3, 3) = 1.0;
-
-        // double roll, pitch, yaw;
-        // sixDpose.M.GetRPY(roll, pitch, yaw);
-        // state_info_.xyz_rpy[3] = roll;
-        // state_info_.xyz_rpy[4] = pitch;
-        // state_info_.xyz_rpy[5] = yaw;
     }
 
     bool ArmKinematicsSolver::SolveIKIntermediate(const KDL::Frame &end_effector_pose)
@@ -76,6 +62,24 @@ namespace cMRKinematics
     {
         if (fk_solver_->JntToCart(joint_positions, sixDpose) < 0)
             cout << "Failed to solve forward kinematics" << endl;
+    }
+
+    void ArmKinematicsSolver::SolveFKAllLinks(const KDL::JntArray &joint_positions, std::vector<KDL::Frame> &all_link_poses)
+    {
+        // Ensure the output vector can hold all segments
+        all_link_poses.resize(chain_.getNrOfSegments());
+
+        KDL::Frame tempFrame;
+        for (int i = 0; i < (int)chain_.getNrOfSegments(); i++)
+        {
+            int ret = fk_solver_->JntToCart(joint_positions, tempFrame, i + 1);
+            if (ret < 0)
+            {
+                RCLCPP_ERROR(node_->get_logger(), "Failed to compute FK for segment %d", i + 1);
+                continue;
+            }
+            all_link_poses[i] = tempFrame;
+        }
     }
 
     bool ArmKinematicsSolver::SolveIK(const KDL::Frame &target_pose)

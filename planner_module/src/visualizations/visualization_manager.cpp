@@ -1,4 +1,5 @@
 #include "visualizations/visualization_manager.hpp"
+#include <chrono>
 
 namespace visualization
 {
@@ -114,6 +115,98 @@ namespace visualization
         RCLCPP_INFO(node_->get_logger(), "Published table vertices.");
     }
 
+    visualization_msgs::msg::MarkerArray VisualizationManager::createTriangleMarker(const std::shared_ptr<fcl::CollisionObjectf> &collision_object,
+                                                                                    int id, const std::string &frame_id)
+    {
+        visualization_msgs::msg::MarkerArray marker_array;
+
+        auto start = std::chrono::high_resolution_clock::now();
+        // 1) Get a *const* pointer to the underlying geometry
+        const fcl::CollisionGeometryf *geometry = collision_object->getCollisionGeometry(); // returns const
+
+        // 2) dynamic_cast to a *const* BVHModel
+        //    because geometry is const
+        auto bvh = dynamic_cast<const fcl::BVHModel<fcl::OBBRSS<float>> *>(geometry);
+
+        if (!bvh)
+        {
+            // If it's not a BVHModel, we can't extract triangle data
+            RCLCPP_WARN(node_->get_logger(),
+                        "Collision geometry is not a BVHModel<fcl::OBBRSS<float>>. Skipping visualization.");
+            return marker_array;
+        }
+
+        // 2) Create a Marker
+        visualization_msgs::msg::Marker marker;
+        marker.header.frame_id = frame_id;
+        marker.ns = "fcl_debug";
+        marker.id = id;
+        marker.type = visualization_msgs::msg::Marker::TRIANGLE_LIST;
+        marker.action = visualization_msgs::msg::Marker::ADD;
+
+        const fcl::Transform3f &transform = collision_object->getTransform();
+
+        // Convert fcl::Transform3f to geometry_msgs::msg::Pose
+        geometry_msgs::msg::Pose pose;
+        pose.position.x = transform.translation().x();
+        pose.position.y = transform.translation().y();
+        pose.position.z = transform.translation().z();
+        Eigen::Matrix3f eigen_rot = transform.rotation();
+
+        Eigen::Quaternionf quat(eigen_rot);
+        quat.normalize(); // Ensure the quaternion is normalized
+
+        pose.orientation.x = quat.x();
+        pose.orientation.y = quat.y();
+        pose.orientation.z = quat.z();
+        pose.orientation.w = quat.w();
+
+        marker.pose = pose;
+
+        marker.scale.x = 1.0;
+        marker.scale.y = 1.0;
+        marker.scale.z = 1.0;
+        marker.color.r = 0.0;
+        marker.color.g = 1.0;
+        marker.color.b = 0.0;
+        marker.color.a = 1.0; // full opacity
+
+        // 3) Fill in the geometry as triangles
+        //    For TRIANGLE_LIST, every 3 points = 1 triangle
+        marker.points.reserve(bvh->num_tris * 3);
+
+        for (int f = 0; f < bvh->num_tris; f++)
+        {
+            auto idx0 = bvh->tri_indices[f][0];
+            auto idx1 = bvh->tri_indices[f][1];
+            auto idx2 = bvh->tri_indices[f][2];
+
+            auto makePoint = [&](int i)
+            {
+                geometry_msgs::msg::Point p;
+                p.x = bvh->vertices[i][0];
+                p.y = bvh->vertices[i][1];
+                p.z = bvh->vertices[i][2];
+                return p;
+            };
+
+            marker.points.push_back(makePoint(idx0));
+            marker.points.push_back(makePoint(idx1));
+            marker.points.push_back(makePoint(idx2));
+        }
+
+        // 4) Wrap in a MarkerArray for publishing
+        marker_array.markers.push_back(marker);
+        // marker_pub_->publish(marker_array);
+        auto end = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double, std::milli> duration = end - start;
+        // Output the duration in milliseconds
+        // std::cout << "Execution time: " << duration.count() << " ms" << std::endl;
+        // RCLCPP_INFO(node_->get_logger(),
+        //             "Published collision object for link with ID=%d.", id);
+        return marker_array;
+    }
+
     void VisualizationManager::publishPathWithOrientations(const std::vector<geometry_msgs::msg::Pose> &path)
     {
         if (path.empty())
@@ -187,4 +280,4 @@ namespace visualization
         marker_pub_->publish(marker_array);
         RCLCPP_INFO(node_->get_logger(), "Published path line strip and orientation frames.");
     }
-} 
+}

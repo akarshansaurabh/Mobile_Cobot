@@ -57,6 +57,8 @@ namespace cMRKinematics
         int GetDOF();
         void SolveFK(const KDL::JntArray &joint_positions);
         bool SolveIK(const KDL::Frame &target_pose);
+        void SolveFKAllLinks(const KDL::JntArray &joint_positions, std::vector<KDL::Frame> &all_link_poses);
+
         // bool SingularityExists(const KDL::JntArray &joint_positions);
     };
 }

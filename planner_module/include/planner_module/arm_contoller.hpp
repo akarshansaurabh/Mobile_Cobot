@@ -19,6 +19,12 @@
 #include "planner_module/kinematics.hpp"
 
 #include "custom_interfaces/srv/goal_pose_vector.hpp"
+#include "planner_module/multithreaded_fcl_loader.hpp"
+
+#include <tf2_ros/buffer.h>
+#include <tf2_ros/transform_listener.h>
+#include <tf2_eigen/tf2_eigen.hpp>
+#include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 
 using namespace std;
 using namespace std::placeholders;
@@ -32,18 +38,23 @@ namespace arm_planner
     class ArmController
     {
     public:
-        ArmController(const rclcpp::Node::SharedPtr &node, const std::shared_ptr<cMRKinematics::ArmKinematicsSolver> &kinematics_solver);
+        ArmController(const rclcpp::Node::SharedPtr &node, const std::shared_ptr<cMRKinematics::ArmKinematicsSolver> &kinematics_solver,
+                      const std::vector<std::shared_ptr<fcl::CollisionObjectf>> &collision_objects);
         ~ArmController() = default;
 
     private:
         rclcpp::Node::SharedPtr node_;
 
+        // composition
         std::shared_ptr<octoMapGenerator::OctoMapGenerator> octoMap_generator_;
         std::shared_ptr<cMRKinematics::ArmKinematicsSolver> kinematics_solver_;
+        std::shared_ptr<visualization::VisualizationManager> viz_manager_;
 
-        std::atomic<bool> activate_arm_motion_planning_, previous_c3_;
+        std::vector<std::shared_ptr<fcl::CollisionObjectf>> collision_objects_;
+        std::atomic<bool> activate_arm_motion_planning_, previous_c3_, subs_callback_rejected_;
         GoalHandleFollowJointTrajectory::SharedPtr arm_goal_hangle_;
         std::string arm_goal_pose_name_, yaml_file_;
+        geometry_msgs::msg::PoseArray box_6d_poses_;
 
         rclcpp::Subscription<geometry_msgs::msg::PoseArray>::SharedPtr box_poses_sub_;
 
@@ -79,7 +90,9 @@ namespace arm_planner
         bool activate_arm_motion_;
         std::vector<std::vector<double>> joint_states_vector_;
 
-        // pcl::PointCloud<pcl::PointXYZRGB>::Ptr accumulated_cloud_;
+        // TF2 buffer and listener
+        std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
+        std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
     };
 }
 

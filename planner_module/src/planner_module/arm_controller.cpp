@@ -1,17 +1,27 @@
 #include <chrono>
 #include <functional>
+#include <future>
+#include <vector>
 #include <memory>
 #include <string>
 #include "planner_module/arm_contoller.hpp"
+
+#include <visualization_msgs/msg/marker_array.hpp>
 
 using namespace std::chrono_literals;
 
 namespace arm_planner
 {
-    ArmController::ArmController(const rclcpp::Node::SharedPtr &node, const std::shared_ptr<cMRKinematics::ArmKinematicsSolver> &kinematics_solver)
-        : node_(node), kinematics_solver_(kinematics_solver)
+    ArmController::ArmController(const rclcpp::Node::SharedPtr &node, const std::shared_ptr<cMRKinematics::ArmKinematicsSolver> &kinematics_solver,
+                                 const std::vector<std::shared_ptr<fcl::CollisionObjectf>> &collision_objects)
+        : node_(node), kinematics_solver_(kinematics_solver), collision_objects_(collision_objects)
     {
         octoMap_generator_ = std::make_shared<octoMapGenerator::OctoMapGenerator>(node_, kinematics_solver_);
+        viz_manager_ = std::make_shared<visualization::VisualizationManager>(node_);
+
+        tf_buffer_ = std::make_shared<tf2_ros::Buffer>(node_->get_clock());
+        tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
+
         // Initialize Action Client
         joint_trajectory_action_client_ = rclcpp_action::create_client<FollowJointTrajectory>(
             node_, "/joint_trajectory_controller/follow_joint_trajectory");
@@ -44,6 +54,7 @@ namespace arm_planner
 
         activate_arm_motion_planning_ = false;
         previous_c3_ = false;
+        subs_callback_rejected_ = false;
     }
 
     void ArmController::SendRequestForColisionFreePlanning(const geometry_msgs::msg::PoseArray &box_poses)
@@ -91,11 +102,14 @@ namespace arm_planner
         // print the poses when activate_arm_motion_planning_ is true;
         if (!activate_arm_motion_planning_)
         {
-            while (!activate_arm_motion_planning_)
-                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            std::cout << "rejected" << std::endl;
+            subs_callback_rejected_ = true;
+            box_6d_poses_ = *box_poses_msg;
+            return;
         }
         /// service call
         SendRequestForColisionFreePlanning(*box_poses_msg);
+        activate_arm_motion_planning_ = false;
         for (const auto &pose : box_poses_msg->poses)
             std::cout << pose.position.x << " " << pose.position.y << " " << pose.position.z << " "
                       << pose.orientation.x << " " << pose.orientation.y << " " << pose.orientation.y << " " << pose.orientation.w << std::endl;
@@ -170,6 +184,65 @@ namespace arm_planner
         cMRKinematics::state_info_.joint_states[4] = kinematics_solver_->initial_guess(4) = feedback->actual.positions[4];
         cMRKinematics::state_info_.joint_states[5] = kinematics_solver_->initial_guess(5) = feedback->actual.positions[5];
         cMRKinematics::state_info_.joint_states[6] = kinematics_solver_->initial_guess(6) = feedback->actual.positions[6];
+        std::vector<KDL::Frame> all_link_poses;
+        kinematics_solver_->SolveFKAllLinks(kinematics_solver_->initial_guess, all_link_poses);
+
+        std::string map_ = "map";
+        std::vector<std::future<visualization_msgs::msg::MarkerArray>> futures;
+        futures.reserve(8);
+
+        // lambda
+        auto process_collision = [this, &map_, &all_link_poses](int i) -> visualization_msgs::msg::MarkerArray
+        {
+            // i know wrt base -> i want wrt map
+            geometry_msgs::msg::TransformStamped map_to_base_transform;
+            try
+            {
+                map_to_base_transform = tf_buffer_->lookupTransform("map", "base_link", tf2::TimePointZero, tf2::durationFromSec(1.0));
+            }
+            catch (tf2::ExtrapolationException &ex)
+            {
+                visualization_msgs::msg::MarkerArray empty_;
+                RCLCPP_WARN(node_->get_logger(), "fcl transformation issue.");
+                return empty_;
+            }
+            Eigen::Matrix4d map_to_base = Eigen::Matrix4d::Identity(), map_to_link = Eigen::Matrix4d::Identity();
+            map_to_base(0, 3) = map_to_base_transform.transform.translation.x;
+            map_to_base(1, 3) = map_to_base_transform.transform.translation.y;
+            map_to_base(2, 3) = map_to_base_transform.transform.translation.z;
+            Eigen::Quaterniond q(map_to_base_transform.transform.rotation.w, map_to_base_transform.transform.rotation.x,
+                                 map_to_base_transform.transform.rotation.y, map_to_base_transform.transform.rotation.z);
+            q.normalize();
+            map_to_base.block<3, 3>(0, 0) = q.toRotationMatrix();
+            map_to_link = map_to_base * Conversions::KDL_2Transform(all_link_poses[i]);
+
+            collision_objects_[i + 1]->setTranslation(fcl::Vector3f(map_to_link(0, 3), map_to_link(1, 3), map_to_link(2, 3)));
+            collision_objects_[i + 1]->setRotation(map_to_link.block<3, 3>(0, 0).cast<float>());
+            return viz_manager_->createTriangleMarker(collision_objects_[i + 1], 404 + i, map_);
+        };
+
+        for (int i = 0; i <= 7; ++i)
+        {
+            futures.emplace_back(std::async(std::launch::async, process_collision, i));
+        }
+        visualization_msgs::msg::MarkerArray global_marker_array;
+        for (auto &f : futures)
+        {
+            try
+            {
+                visualization_msgs::msg::MarkerArray marker_array = f.get();
+                global_marker_array.markers.insert(global_marker_array.markers.end(), marker_array.markers.begin(), marker_array.markers.end());
+            }
+            catch (const std::exception &e)
+            {
+                RCLCPP_ERROR(node_->get_logger(), "Exception in async task: %s", e.what());
+            }
+            catch (...)
+            {
+                RCLCPP_ERROR(node_->get_logger(), "Unknown exception in async task.");
+            }
+        }
+        viz_manager_->marker_pub_->publish(global_marker_array);
     }
 
     void ArmController::proceedToNextViewpoint(std::string str)
@@ -239,8 +312,16 @@ namespace arm_planner
             else if (arm_goal_pose_name_ == "nav_pose")
             {
                 if (previous_c3_)
+                {
                     activate_arm_motion_planning_ = true;
+                }
                 previous_c3_ = false;
+                if (subs_callback_rejected_)
+                {
+                    SendRequestForColisionFreePlanning(box_6d_poses_);
+                    activate_arm_motion_planning_ = false;
+                    subs_callback_rejected_ = false;
+                }
             }
             else if (arm_goal_pose_name_ == "picking")
             {
@@ -366,5 +447,4 @@ namespace arm_planner
         this->SendJointTrajectoryGoal(arm_goal);
         return result;
     }
-
 }

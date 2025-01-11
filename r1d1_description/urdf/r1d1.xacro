@@ -332,6 +332,11 @@
   </collision>
 </link>
 
+<!-- base_link -> linear_1 -> 
+arm_base_link_1 -> 
+shoulder_Link_1 -> 
+upperarm_Link_1 -> 
+forearm_Link_1 -->
  
 <joint name="slider" type="prismatic">
   <origin xyz="0.005999 0.0445 1.067874" rpy="0 0 0"/>
