@@ -38,6 +38,11 @@
 #include <octomap/octomap.h>
 #include <octomap/OcTree.h>
 
+// FCL
+#include <fcl/fcl.h>
+#include <fcl/geometry/bvh/BVH_model.h>
+#include <fcl/narrowphase/collision.h>
+
 #include "visualizations/visualization_manager.hpp"
 #include "planner_module/collision_free_planner.hpp"
 #include "planner_module/kinematics.hpp"
@@ -98,6 +103,7 @@ namespace octoMapGenerator
         rclcpp::Node::SharedPtr node_;
         std::shared_ptr<octomap::OcTree> octree_;
         rclcpp::Service<custom_interfaces::srv::GoalPoseVector>::SharedPtr colision_free_planner_server_;
+        std::vector<std::shared_ptr<fcl::CollisionObjectf>> link_collision_objects_;
 
         std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
         std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
@@ -107,7 +113,8 @@ namespace octoMapGenerator
                                                    std::shared_ptr<custom_interfaces::srv::GoalPoseVector::Response> response);
 
     public:
-        OctoMapGenerator(const rclcpp::Node::SharedPtr &node, const std::shared_ptr<cMRKinematics::ArmKinematicsSolver> &kinematics_solver);
+        OctoMapGenerator(const rclcpp::Node::SharedPtr &node, const std::shared_ptr<cMRKinematics::ArmKinematicsSolver> &kinematics_solver,
+                         const std::vector<std::shared_ptr<fcl::CollisionObjectf>> &link_collision_objects);
         void buildOctomap(const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &pcl_cloud, double resolution = 0.02);
     };
 }

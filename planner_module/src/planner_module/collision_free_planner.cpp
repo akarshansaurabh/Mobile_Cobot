@@ -7,11 +7,37 @@
 
 namespace collision_free_planning
 {
+    // struct MyCollisionCallback : public fcl::BroadPhaseCollisionManagerf::CollisionCallBack
+    // {
+    //     bool *collisionFound; // we store a pointer to indicate if collision was found
+    //     MyCollisionCallback(bool *found) : collisionFound(found) {}
+
+    //     bool collisionCallback(fcl::CollisionObjectf *obj1,
+    //                            fcl::CollisionObjectf *obj2) override
+    //     {
+    //         fcl::CollisionRequestf request;
+    //         request.num_max_contacts = 1;
+    //         request.enable_contact = false;
+    //         request.enable_cost = false;
+    //         fcl::CollisionResultf result;
+
+    //         fcl::collide(obj1, obj2, request, result);
+    //         if (result.isCollision())
+    //         {
+    //             *collisionFound = true;
+    //             return true;
+    //         }
+    //         return false; // false => continue checking
+    //     }
+    // };
+
     CollisionFreePlanner::CollisionFreePlanner(const std::shared_ptr<rclcpp::Node> &node,
                                                const std::shared_ptr<octomap::OcTree> &octree,
                                                const std::shared_ptr<cMRKinematics::ArmKinematicsSolver> &kinematics_solver,
-                                               const geometry_msgs::msg::TransformStamped &map_to_base_transform)
-        : node_(node), octree_(octree), kinematics_solver_(kinematics_solver), map_to_base_transform_(map_to_base_transform)
+                                               const geometry_msgs::msg::TransformStamped &map_to_base_transform,
+                                               const std::vector<std::shared_ptr<fcl::CollisionObjectf>> &link_collision_objects)
+        : node_(node), octree_(octree), kinematics_solver_(kinematics_solver), map_to_base_transform_(map_to_base_transform),
+          link_collision_objects_(link_collision_objects)
     {
         tf_buffer_ = std::make_shared<tf2_ros::Buffer>(node_->get_clock());
         tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
@@ -19,11 +45,17 @@ namespace collision_free_planning
         map_frame_ = "map";
         end_effector_link_ = "ee_link";
 
-        // We'll introduce a parameter for unknown cells in octomap
-        // node_->declare_parameter<bool>("treat_unknown_as_occupied", false);
-        // node_->get_parameter<bool>("treat_unknown_as_occupied", treat_unknown_as_occupied_);
+        std::shared_ptr<fcl::OcTreef> fcl_octree = std::make_shared<fcl::OcTreef>(octree_);
+        environment_collision_ = std::make_shared<fcl::CollisionObjectf>(fcl_octree);
 
-        // initFCL();
+        // manager_ = std::make_shared<fcl::DynamicAABBTreeCollisionManagerf>();
+        // manager_->registerObject(environment_collision_.get());
+        // for (auto &link_obj : link_collision_objects_)
+        //     manager_->registerObject(link_obj.get());
+        // manager_->setup();
+        // RCLCPP_INFO(node_->get_logger(),
+        //             "[CollisionFreePlanner] FCL broad-phase manager created with %zu link objs + 1 environment.",
+        //             link_collision_objects_.size());
     }
 
     std::vector<std::vector<double>> CollisionFreePlanner::planPath(const geometry_msgs::msg::Pose &box_top_face_pose)
@@ -50,6 +82,7 @@ namespace collision_free_planning
         }
         Eigen::Matrix4d Tmapbase = Conversions::TransformStamped_2Eigen(map_to_base_transform_);
         Eigen::Matrix4d Tmapbox = Conversions::Pose_2Eigen(box_top_face_pose);
+        Tmapbox(2, 3) += 0.025;
         Eigen::Matrix4d Tbasebox_grasp_pose = Tmapbase.inverse() * Tmapbox;
         Eigen::Vector3d z_cap = -Tbasebox_grasp_pose.block<3, 1>(0, 2);
         Eigen::Vector3d y_cap = Tbasebox_grasp_pose.block<3, 1>(0, 1);
@@ -190,7 +223,7 @@ namespace collision_free_planning
         ss.setPlanner(std::make_shared<og::RRTConnect>(ss.getSpaceInformation()));
 
         // 6) Solve
-        ob::PlannerStatus solved = ss.solve(2.0); // 2-second time budget
+        ob::PlannerStatus solved = ss.solve(5.0); // 2-second time budget
 
         if (solved)
         {
@@ -250,6 +283,71 @@ namespace collision_free_planning
 
     bool CollisionFreePlanner::isStateValid(const ob::State *state) const
     {
+        // 1) Update link transforms according to the joint configuration
+        if (!updateLinkCollisionTransforms(state))
+            return false;
+
+        // 2) Prepare a FCL collision request
+        fcl::CollisionRequestf request;
+        request.enable_contact = false; // We only need boolean collision check
+        request.num_max_contacts = 1;   // Stop after one contact
+        request.enable_cost = false;    // We skip cost computations
+
+        fcl::CollisionResultf result;
+
+        // 3) Check link vs. environment
+        if (environment_collision_)
+            for (int i = 2; i < 9; i++)
+            {
+                fcl::collide(link_collision_objects_[i].get(), environment_collision_.get(), request, result);
+                if (result.isCollision())
+                {
+                    std::cout << "collision is there" << std::endl;
+                    return false;
+                }
+            }
+
+        return true;
+
+        // manager_->update();
+        // return !broadPhaseCheckCollision();
+    }
+
+    // bool CollisionFreePlanner::broadPhaseCheckCollision() const
+    // {
+    //     bool collisionFound = false;
+    //     MyCollisionCallback callback(&collisionFound);
+    //     manager_->collide(&callback);
+    //     return collisionFound;
+    // }
+
+    bool CollisionFreePlanner::updateLinkCollisionTransforms(const ob::State *state) const
+    {
+        // Convert RealVectorStateSpace -> KDL::JntArray
+        KDL::JntArray joint_positions(7);
+        const auto *values = state->as<ob::RealVectorStateSpace::StateType>()->values;
+        for (int i = 0; i < 7; i++)
+            joint_positions(i) = values[i];
+
+        // Solve forward kinematics
+        std::vector<KDL::Frame> all_link_poses;
+        kinematics_solver_->SolveFKAllLinks(joint_positions, all_link_poses);
+
+        Eigen::Matrix4d map_to_base = Eigen::Matrix4d::Identity();
+        map_to_base(0, 3) = map_to_base_transform_.transform.translation.x;
+        map_to_base(1, 3) = map_to_base_transform_.transform.translation.y;
+        map_to_base(2, 3) = map_to_base_transform_.transform.translation.z;
+        Eigen::Quaterniond q(map_to_base_transform_.transform.rotation.w, map_to_base_transform_.transform.rotation.x,
+                             map_to_base_transform_.transform.rotation.y, map_to_base_transform_.transform.rotation.z);
+        q.normalize();
+        map_to_base.block<3, 3>(0, 0) = q.toRotationMatrix();
+
+        for (int i = 0; i <= 7; ++i)
+        {
+            Eigen::Matrix4d map_to_link = map_to_base * Conversions::KDL_2Transform(all_link_poses[i]);
+            link_collision_objects_[i + 1]->setTranslation(fcl::Vector3f(map_to_link(0, 3), map_to_link(1, 3), map_to_link(2, 3)));
+            link_collision_objects_[i + 1]->setRotation(map_to_link.block<3, 3>(0, 0).cast<float>());
+        }
 
         return true;
     }

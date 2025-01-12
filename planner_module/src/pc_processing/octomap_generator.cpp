@@ -159,8 +159,9 @@ namespace octoMapGenerator
         }
     }
 
-    OctoMapGenerator::OctoMapGenerator(const rclcpp::Node::SharedPtr &node, const std::shared_ptr<cMRKinematics::ArmKinematicsSolver> &kinematics_solver)
-        : node_(node), kinematics_solver_(kinematics_solver)
+    OctoMapGenerator::OctoMapGenerator(const rclcpp::Node::SharedPtr &node, const std::shared_ptr<cMRKinematics::ArmKinematicsSolver> &kinematics_solver,
+                                       const std::vector<std::shared_ptr<fcl::CollisionObjectf>> &link_collision_objects)
+        : node_(node), kinematics_solver_(kinematics_solver), link_collision_objects_(link_collision_objects)
     {
         colision_free_planner_server_ = node_->create_service<custom_interfaces::srv::GoalPoseVector>(
             "colision_free_planner_service", std::bind(&OctoMapGenerator::ServerCallbackForColisionFreePlanning,
@@ -175,7 +176,8 @@ namespace octoMapGenerator
                                                                  std::shared_ptr<custom_interfaces::srv::GoalPoseVector::Response> response)
     {
         buildOctomap(accumulated_cloud_);
-        auto ompl_planner = std::make_unique<collision_free_planning::CollisionFreePlanner>(node_, octree_, kinematics_solver_, map_to_base_transform);
+        auto ompl_planner = std::make_unique<collision_free_planning::CollisionFreePlanner>(node_, octree_, kinematics_solver_, map_to_base_transform,
+                                                                                            link_collision_objects_);
 
         std::vector<std::vector<double>> joint_states_vector = ompl_planner->planPath(request->goal_poses_for_arm.poses[0]);
         std::cout << "ompl planning done" << std::endl;
