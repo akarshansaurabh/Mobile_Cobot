@@ -5,6 +5,7 @@
 #include <string>
 #include <array>
 #include <vector>
+#include <future>
 
 #include <rclcpp/rclcpp.hpp>
 #include <tf2_ros/buffer.h>
@@ -52,7 +53,7 @@ namespace collision_free_planning
     public:
         explicit CollisionFreePlanner(const std::shared_ptr<rclcpp::Node> &node,
                                       const std::shared_ptr<octomap::OcTree> &octree,
-                                      const std::shared_ptr<cMRKinematics::ArmKinematicsSolver> &kinematics_solver,
+                                      const std::shared_ptr<cMRKinematics::ArmKinematicsSolver<7>> &kinematics_solver,
                                       const geometry_msgs::msg::TransformStamped &map_to_base_transform,
                                       const std::vector<std::shared_ptr<fcl::CollisionObjectf>> &link_collision_objects);
         ~CollisionFreePlanner() = default;
@@ -79,7 +80,7 @@ namespace collision_free_planning
         geometry_msgs::msg::TransformStamped map_to_base_transform_;
 
         // composition
-        std::shared_ptr<cMRKinematics::ArmKinematicsSolver> kinematics_solver_;
+        std::shared_ptr<cMRKinematics::ArmKinematicsSolver<7>> kinematics_solver_;
 
     private:
         geometry_msgs::msg::Pose getCurrentEndEffectorPose() const;

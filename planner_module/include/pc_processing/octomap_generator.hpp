@@ -70,6 +70,7 @@ namespace octoMapGenerator
         float voxel_grid_leaf_size_;
         int mean_k_;
         double std_dev_mul_thresh_;
+        bool process_callback;
 
         std::string map_frame_;
         std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
@@ -107,13 +108,13 @@ namespace octoMapGenerator
 
         std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
         std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
-        std::shared_ptr<cMRKinematics::ArmKinematicsSolver> kinematics_solver_;
+        std::shared_ptr<cMRKinematics::ArmKinematicsSolver<7>> kinematics_solver_;
 
         void ServerCallbackForColisionFreePlanning(const std::shared_ptr<custom_interfaces::srv::GoalPoseVector::Request> request,
                                                    std::shared_ptr<custom_interfaces::srv::GoalPoseVector::Response> response);
 
     public:
-        OctoMapGenerator(const rclcpp::Node::SharedPtr &node, const std::shared_ptr<cMRKinematics::ArmKinematicsSolver> &kinematics_solver,
+        OctoMapGenerator(const rclcpp::Node::SharedPtr &node, const std::shared_ptr<cMRKinematics::ArmKinematicsSolver<7>> &kinematics_solver,
                          const std::vector<std::shared_ptr<fcl::CollisionObjectf>> &link_collision_objects);
         void buildOctomap(const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &pcl_cloud, double resolution = 0.02);
     };

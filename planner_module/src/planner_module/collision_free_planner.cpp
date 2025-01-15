@@ -33,7 +33,7 @@ namespace collision_free_planning
 
     CollisionFreePlanner::CollisionFreePlanner(const std::shared_ptr<rclcpp::Node> &node,
                                                const std::shared_ptr<octomap::OcTree> &octree,
-                                               const std::shared_ptr<cMRKinematics::ArmKinematicsSolver> &kinematics_solver,
+                                               const std::shared_ptr<cMRKinematics::ArmKinematicsSolver<7>> &kinematics_solver,
                                                const geometry_msgs::msg::TransformStamped &map_to_base_transform,
                                                const std::vector<std::shared_ptr<fcl::CollisionObjectf>> &link_collision_objects)
         : node_(node), octree_(octree), kinematics_solver_(kinematics_solver), map_to_base_transform_(map_to_base_transform),
@@ -67,22 +67,11 @@ namespace collision_free_planning
                          "No OctoMap available! Call buildOctomap() before planning.");
             return full_path;
         }
-
-        // Compute Grasp Pose in Base
-        geometry_msgs::msg::TransformStamped map_to_base_transform;
-        try
-        {
-            map_to_base_transform = tf_buffer_->lookupTransform("map", "base_link", tf2::TimePointZero, tf2::durationFromSec(5.0));
-        }
-        catch (tf2::ExtrapolationException &ex)
-        {
-            RCLCPP_WARN(node_->get_logger(),
-                        "TF extrapolation error.");
-            return full_path;
-        }
+        auto start = std::chrono::high_resolution_clock::now();
+        // Compute Grasp and Pre Grasp Pose in Base
         Eigen::Matrix4d Tmapbase = Conversions::TransformStamped_2Eigen(map_to_base_transform_);
         Eigen::Matrix4d Tmapbox = Conversions::Pose_2Eigen(box_top_face_pose);
-        Tmapbox(2, 3) += 0.025;
+        Tmapbox(2, 3) += 0.005;
         Eigen::Matrix4d Tbasebox_grasp_pose = Tmapbase.inverse() * Tmapbox;
         Eigen::Vector3d z_cap = -Tbasebox_grasp_pose.block<3, 1>(0, 2);
         Eigen::Vector3d y_cap = Tbasebox_grasp_pose.block<3, 1>(0, 1);
@@ -94,6 +83,7 @@ namespace collision_free_planning
         Eigen::Matrix4d pre_grasp_pose = Tbasebox_grasp_pose;
         pre_grasp_pose(2, 3) += 0.10;
 
+        // IK for pre grasp pose
         KDL::JntArray start_positions(7), pre_grasp_positions(7), grasp_positions(7);
         start_positions(0) = cMRKinematics::state_info_.joint_states[0];
         start_positions(1) = cMRKinematics::state_info_.joint_states[1];
@@ -102,25 +92,110 @@ namespace collision_free_planning
         start_positions(4) = cMRKinematics::state_info_.joint_states[4];
         start_positions(5) = cMRKinematics::state_info_.joint_states[5];
         start_positions(6) = cMRKinematics::state_info_.joint_states[6];
-        // std::cout << "desired xyz " << pre_grasp_pose(0, 3) << " " << pre_grasp_pose(1, 3) << " " << pre_grasp_pose(2, 3) << " " << std::endl;
         if (!kinematics_solver_->SolveIK(Conversions::Transform_2KDL(pre_grasp_pose)))
         {
             std::cout << "[pre_grasp_pose] IK NOT FOUND" << std::endl;
             return full_path;
         }
-
         pre_grasp_positions = kinematics_solver_->q;
-        // kinematics_solver_->SolveFK(pre_grasp_positions);
 
-        if (!kinematics_solver_->SolveIK(Conversions::Transform_2KDL(Tbasebox_grasp_pose)))
+        //****************************************************************************
+        std::vector<KDL::Frame> all_link_poses_7dof;
+        kinematics_solver_->SolveFKAllLinks(pre_grasp_positions, all_link_poses_7dof);
+        auto T_base_slider = Conversions::KDL_2Transform(all_link_poses_7dof[1]);
+
+        const int num_samples = 10;
+        double lower_prismatic = -0.1;
+        double upper_prismatic = 0.5;
+        double step = (upper_prismatic - lower_prismatic) / (num_samples - 1);
+
+        bool found_collision_free = false, ompl_successful = false;
+        std::unique_ptr<cMRKinematics::ArmKinematicsSolver<6>> kinematics_solver_6dof_;
+        std::string urdf_param = "robot_description";
+        std::string root_link = "arm_base_link_1";
+        std::string tip_link = "ee_link";
+        kinematics_solver_6dof_ = std::make_unique<cMRKinematics::ArmKinematicsSolver<6>>(node_, urdf_param,
+                                                                                          root_link, tip_link, false);
+        kinematics_solver_6dof_->initial_guess(0) = pre_grasp_positions(1);
+        kinematics_solver_6dof_->initial_guess(1) = pre_grasp_positions(2);
+        kinematics_solver_6dof_->initial_guess(2) = pre_grasp_positions(3);
+        kinematics_solver_6dof_->initial_guess(3) = pre_grasp_positions(4);
+        kinematics_solver_6dof_->initial_guess(4) = pre_grasp_positions(5);
+        kinematics_solver_6dof_->initial_guess(5) = pre_grasp_positions(6);
+        auto space = std::make_shared<ob::RealVectorStateSpace>(7);
+        ob::RealVectorBounds bounds(7);
+        bounds.setLow(0, -0.1);
+        bounds.setHigh(0, 0.5);
+        for (int i = 1; i < 7; i++)
         {
-            std::cout << "[grasp_pose] IK NOT FOUND" << std::endl;
+            bounds.setLow(i, -3.14);
+            bounds.setHigh(i, 3.14);
+        }
+        space->setBounds(bounds);
+
+        int max_itr = -1, max_itr2 = -1;
+        std::vector<ob::ScopedState<ob::RealVectorStateSpace>> start_to_pregrasp, pregrasp_to_grasp;
+
+        while (!found_collision_free && max_itr < 10)
+        {
+            max_itr++;
+            std::cout << "max_itr " << max_itr << std::endl;
+            for (int i = 0; i < num_samples; ++i)
+            {
+                double d1 = lower_prismatic + i * step;
+                // std::cout << "d1 " << d1 << std::endl;
+                T_base_slider(2, 3) = 1.1 - d1;
+                auto T_slider_box = T_base_slider.inverse() * Tbasebox_grasp_pose;
+                if (!kinematics_solver_6dof_->SolveIK(Conversions::Transform_2KDL(T_slider_box)))
+                    continue;
+
+                KDL::JntArray candidate_7dof(7);
+                ob::ScopedState<ob::RealVectorStateSpace> st(space);
+                st->values[0] = candidate_7dof(0) = d1;
+                for (int j = 0; j < 6; j++)
+                    st->values[j + 1] = candidate_7dof(j + 1) = kinematics_solver_6dof_->q(j);
+
+                if (isStateValid(st.get()))
+                {
+                    found_collision_free = true;
+                    for (int idx = 0; idx < 7; idx++)
+                        grasp_positions(idx) = candidate_7dof(idx);
+                    break;
+                }
+            }
+        }
+        if (!found_collision_free)
+        {
+            RCLCPP_WARN(node_->get_logger(),
+                        "[planPath] No collision-free IK found among prismatic samples.");
             return full_path;
         }
+        //*************************************************************************
+        std::vector<std::future<std::vector<ob::ScopedState<ob::RealVectorStateSpace>>>> futures;
+        futures.reserve(2);
+        auto lambda_ = [this](const KDL::JntArray &first_state, const KDL::JntArray &second_state)
+            -> std::vector<ob::ScopedState<ob::RealVectorStateSpace>>
+        {
+            return PlanInJointSpace(first_state, second_state);
+        };
+        futures.emplace_back(std::async(std::launch::async, lambda_, start_positions, pre_grasp_positions));
+        futures.emplace_back(std::async(std::launch::async, lambda_, pre_grasp_positions, grasp_positions));
+        for (int i = 0; i < 2; i++)
+        {
+            if (i == 0)
+                start_to_pregrasp = futures[i].get();
+            else
+                pregrasp_to_grasp = futures[i].get();
+        }
 
-        grasp_positions = kinematics_solver_->q;
-        auto start_to_pregrasp = PlanInJointSpace(start_positions, pre_grasp_positions);
-        auto pregrasp_to_grasp = PlanInJointSpace(pre_grasp_positions, grasp_positions);
+        auto end = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double, std::milli> duration = end - start;
+        std::cout << "Execution time: " << duration.count() << " ms" << std::endl;
+        if (start_to_pregrasp.size() < 2 || pregrasp_to_grasp.size() < 2)
+        {
+            std::cout << "ompl Planning failed" << std::endl;
+            return full_path;
+        }
         std::this_thread::sleep_for(std::chrono::milliseconds(250));
         auto start_to_pregrasp_vector2D = StatesToPath(start_to_pregrasp);
         auto pregrasp_to_grasp_vector2D = StatesToPath(pregrasp_to_grasp);
@@ -183,8 +258,16 @@ namespace collision_free_planning
         bounds.setHigh(0, 0.5);
         for (int i = 1; i < 7; i++)
         {
-            bounds.setLow(i, -3.14);
-            bounds.setHigh(i, 3.14);
+            if (i == 2 || i == 3)
+            {
+                bounds.setLow(i, -2.5);
+                bounds.setHigh(i, 2.5);
+            }
+            else
+            {
+                bounds.setLow(i, -3.14);
+                bounds.setHigh(i, 3.14);
+            }
         }
         space->setBounds(bounds);
 
@@ -251,6 +334,7 @@ namespace collision_free_planning
         {
             RCLCPP_WARN(node_->get_logger(),
                         "[CollisionFreePlanner] OMPL could not find a path in plan3D()");
+            solution.clear();
         }
         return solution;
     }
@@ -307,6 +391,16 @@ namespace collision_free_planning
                 }
             }
 
+        // for (int i = 3; i < 8; i++)
+        //     for (int j = i + 1; j < 9; j++)
+        //     {
+        fcl::collide(link_collision_objects_[5].get(), link_collision_objects_[7].get(), request, result);
+        if (result.isCollision())
+        {
+            std::cout << "self collision is there" << std::endl;
+            return false;
+        }
+        //     }
         return true;
 
         // manager_->update();

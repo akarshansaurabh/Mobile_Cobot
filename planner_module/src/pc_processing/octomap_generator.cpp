@@ -25,66 +25,70 @@ namespace octoMapGenerator
         pointcloud_sub_ = node_->create_subscription<sensor_msgs::msg::PointCloud2>(
             "/arm_rgbd_camera/points", rclcpp::QoS(10),
             std::bind(&PointCloudStitcher::pointCloudSnapShotCallback, this, std::placeholders::_1));
-
+        process_callback = true;
         box6dposes_client_ = node_->create_client<custom_interfaces::srv::BoxposeEstimator>("six_d_pose_estimate_service");
     }
 
     void PointCloudStitcher::pointCloudSnapShotCallback(const sensor_msgs::msg::PointCloud2::ConstSharedPtr &snapshot_msg)
     {
-        std::string camera_frame = snapshot_msg->header.frame_id;
-        rclcpp::Time cloud_time = snapshot_msg->header.stamp;
-
-        try
+        if (process_callback)
         {
-            map_to_camera_transform = tf_buffer_->lookupTransform(
-                map_frame_, camera_frame, cloud_time, tf2::durationFromSec(1.0));
-        }
-        catch (tf2::ExtrapolationException &ex)
-        {
-            RCLCPP_WARN(node_->get_logger(),
-                        "TF extrapolation error for time %.9f. Retrying with latest available transform.",
-                        cloud_time.seconds());
-            return;
-        }
+            std::string camera_frame = snapshot_msg->header.frame_id;
+            rclcpp::Time cloud_time = snapshot_msg->header.stamp;
 
-        pcl::PointCloud<pcl::PointXYZRGB>::Ptr pcl_snapshot_in_map = transformCloudToMap(*snapshot_msg);
-        addCloudSnapshot(pcl_snapshot_in_map);
-
-        if (start_stiching)
-        {
-            finalizeStitching(0.005f);
-            sensor_msgs::msg::PointCloud2 octomap;
-            pcl::toROSMsg(*accumulated_cloud_, octomap);
-            octomap.header.stamp = node_->now();
-            octomap.header.frame_id = map_frame_;
-            octomap_pub_->publish(octomap);
             try
             {
-                map_to_base_transform = tf_buffer_->lookupTransform("map", "base_link", cloud_time, tf2::durationFromSec(5.0));
-                std::cout << "base at the time of snapshot " << map_to_base_transform.transform.translation.x << " "
-                          << map_to_base_transform.transform.translation.y << " "
-                          << map_to_base_transform.transform.translation.z << " "
-                          << map_to_base_transform.transform.rotation.x << " "
-                          << map_to_base_transform.transform.rotation.y << " "
-                          << map_to_base_transform.transform.rotation.z << " "
-                          << map_to_base_transform.transform.rotation.w << " " << std::endl;
+                map_to_camera_transform = tf_buffer_->lookupTransform(
+                    map_frame_, camera_frame, cloud_time, tf2::durationFromSec(1.0));
             }
             catch (tf2::ExtrapolationException &ex)
             {
                 RCLCPP_WARN(node_->get_logger(),
-                            "No Base.",
+                            "TF extrapolation error for time %.9f. Retrying with latest available transform.",
                             cloud_time.seconds());
                 return;
             }
-            SendRequestFor6DPoseEstimation(0.1, octomap);
-        }
 
-        {
-            std::lock_guard<std::mutex> lock(mutex_);
-            callback_triggered_ = true;
+            pcl::PointCloud<pcl::PointXYZRGB>::Ptr pcl_snapshot_in_map = transformCloudToMap(*snapshot_msg);
+            addCloudSnapshot(pcl_snapshot_in_map);
+
+            if (start_stiching)
+            {
+                finalizeStitching(0.005f);
+                sensor_msgs::msg::PointCloud2 octomap;
+                pcl::toROSMsg(*accumulated_cloud_, octomap);
+                octomap.header.stamp = node_->now();
+                octomap.header.frame_id = map_frame_;
+                octomap_pub_->publish(octomap);
+                try
+                {
+                    map_to_base_transform = tf_buffer_->lookupTransform("map", "base_link", cloud_time, tf2::durationFromSec(5.0));
+                    std::cout << "base at the time of snapshot " << map_to_base_transform.transform.translation.x << " "
+                              << map_to_base_transform.transform.translation.y << " "
+                              << map_to_base_transform.transform.translation.z << " "
+                              << map_to_base_transform.transform.rotation.x << " "
+                              << map_to_base_transform.transform.rotation.y << " "
+                              << map_to_base_transform.transform.rotation.z << " "
+                              << map_to_base_transform.transform.rotation.w << " " << std::endl;
+                }
+                catch (tf2::ExtrapolationException &ex)
+                {
+                    RCLCPP_WARN(node_->get_logger(),
+                                "No Base.",
+                                cloud_time.seconds());
+                    return;
+                }
+                SendRequestFor6DPoseEstimation(0.1, octomap);
+            }
+
+            {
+                std::lock_guard<std::mutex> lock(mutex_);
+                callback_triggered_ = true;
+            }
+            cv_.notify_one();
+            process_callback = false;
         }
-        cv_.notify_one();
-        pointcloud_sub_.reset();
+        // pointcloud_sub_.reset();
     }
 
     // source of error - robot is at A1 when snapshot taken, but in TF, robot is at A1'
@@ -159,7 +163,7 @@ namespace octoMapGenerator
         }
     }
 
-    OctoMapGenerator::OctoMapGenerator(const rclcpp::Node::SharedPtr &node, const std::shared_ptr<cMRKinematics::ArmKinematicsSolver> &kinematics_solver,
+    OctoMapGenerator::OctoMapGenerator(const rclcpp::Node::SharedPtr &node, const std::shared_ptr<cMRKinematics::ArmKinematicsSolver<7>> &kinematics_solver,
                                        const std::vector<std::shared_ptr<fcl::CollisionObjectf>> &link_collision_objects)
         : node_(node), kinematics_solver_(kinematics_solver), link_collision_objects_(link_collision_objects)
     {
@@ -184,11 +188,12 @@ namespace octoMapGenerator
         // auto visualizer = std::make_unique<visualization::VisualizationManager>(node_);
         // visualizer->publishPathWithOrientations(colision_free_path);
         std_msgs::msg::Float64MultiArray float_array_msg;
-        for (const auto &joint_states : joint_states_vector)
-        {
-            float_array_msg.data = joint_states;
-            response->joint_states_vector.push_back(float_array_msg);
-        }
+        if (!joint_states_vector.empty())
+            for (const auto &joint_states : joint_states_vector)
+            {
+                float_array_msg.data = joint_states;
+                response->joint_states_vector.push_back(float_array_msg);
+            }
         response->reply = true;
         accumulated_cloud_->points.clear();
     }

@@ -38,7 +38,7 @@ namespace arm_planner
     class ArmController
     {
     public:
-        ArmController(const rclcpp::Node::SharedPtr &node, const std::shared_ptr<cMRKinematics::ArmKinematicsSolver> &kinematics_solver,
+        ArmController(const rclcpp::Node::SharedPtr &node, const std::shared_ptr<cMRKinematics::ArmKinematicsSolver<7>> &kinematics_solver,
                       const std::vector<std::shared_ptr<fcl::CollisionObjectf>> &collision_objects);
         ~ArmController() = default;
 
@@ -47,7 +47,7 @@ namespace arm_planner
 
         // composition
         std::shared_ptr<octoMapGenerator::OctoMapGenerator> octoMap_generator_;
-        std::shared_ptr<cMRKinematics::ArmKinematicsSolver> kinematics_solver_;
+        std::shared_ptr<cMRKinematics::ArmKinematicsSolver<7>> kinematics_solver_;
         std::shared_ptr<visualization::VisualizationManager> viz_manager_;
 
         std::vector<std::shared_ptr<fcl::CollisionObjectf>> collision_objects_;

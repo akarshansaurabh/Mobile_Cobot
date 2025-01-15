@@ -12,7 +12,7 @@ using namespace std::chrono_literals;
 
 namespace arm_planner
 {
-    ArmController::ArmController(const rclcpp::Node::SharedPtr &node, const std::shared_ptr<cMRKinematics::ArmKinematicsSolver> &kinematics_solver,
+    ArmController::ArmController(const rclcpp::Node::SharedPtr &node, const std::shared_ptr<cMRKinematics::ArmKinematicsSolver<7>> &kinematics_solver,
                                  const std::vector<std::shared_ptr<fcl::CollisionObjectf>> &collision_objects)
         : node_(node), kinematics_solver_(kinematics_solver), collision_objects_(collision_objects)
     {
@@ -73,22 +73,26 @@ namespace arm_planner
     void ArmController::HandleResponse(rclcpp::Client<custom_interfaces::srv::GoalPoseVector>::SharedFuture future)
     {
         auto result = future.get();
+        joint_states_vector_.clear();
         if (result->reply)
         {
-            joint_states_vector_.resize(result->joint_states_vector.size());
-            for (int i = 1; i < result->joint_states_vector.size(); i++)
+            if (result->joint_states_vector.size() > 0)
             {
-                joint_states_vector_[i].push_back(result->joint_states_vector[i].data[0]);
-                joint_states_vector_[i].push_back(result->joint_states_vector[i].data[1]);
-                joint_states_vector_[i].push_back(result->joint_states_vector[i].data[2]);
-                joint_states_vector_[i].push_back(result->joint_states_vector[i].data[3]);
-                joint_states_vector_[i].push_back(result->joint_states_vector[i].data[4]);
-                joint_states_vector_[i].push_back(result->joint_states_vector[i].data[5]);
-                joint_states_vector_[i].push_back(result->joint_states_vector[i].data[6]);
+                joint_states_vector_.resize(result->joint_states_vector.size());
+                for (int i = 1; i < result->joint_states_vector.size(); i++)
+                {
+                    joint_states_vector_[i].push_back(result->joint_states_vector[i].data[0]);
+                    joint_states_vector_[i].push_back(result->joint_states_vector[i].data[1]);
+                    joint_states_vector_[i].push_back(result->joint_states_vector[i].data[2]);
+                    joint_states_vector_[i].push_back(result->joint_states_vector[i].data[3]);
+                    joint_states_vector_[i].push_back(result->joint_states_vector[i].data[4]);
+                    joint_states_vector_[i].push_back(result->joint_states_vector[i].data[5]);
+                    joint_states_vector_[i].push_back(result->joint_states_vector[i].data[6]);
+                }
+                auto next_joint_trajectory = CreateJointTrajectory(result->joint_states_vector[1].data, 3.0);
+                arm_goal_pose_name_ = "pre_grasp";
+                SendJointTrajectoryGoal(next_joint_trajectory);
             }
-            auto next_joint_trajectory = CreateJointTrajectory(result->joint_states_vector[1].data, 3.0);
-            arm_goal_pose_name_ = "picking";
-            SendJointTrajectoryGoal(next_joint_trajectory);
             RCLCPP_INFO(node_->get_logger(), "Service call succeeded: ");
         }
         else
@@ -184,7 +188,7 @@ namespace arm_planner
         cMRKinematics::state_info_.joint_states[4] = kinematics_solver_->initial_guess(4) = feedback->actual.positions[4];
         cMRKinematics::state_info_.joint_states[5] = kinematics_solver_->initial_guess(5) = feedback->actual.positions[5];
         cMRKinematics::state_info_.joint_states[6] = kinematics_solver_->initial_guess(6) = feedback->actual.positions[6];
-       
+
         std::vector<KDL::Frame> all_link_poses;
         kinematics_solver_->SolveFKAllLinks(kinematics_solver_->initial_guess, all_link_poses);
 
@@ -323,24 +327,30 @@ namespace arm_planner
                     subs_callback_rejected_ = false;
                 }
             }
-            else if (arm_goal_pose_name_ == "picking")
+            else if (arm_goal_pose_name_ == "pre_grasp")
             {
-
-                auto next_joint_trajectory = CreateJointTrajectory(joint_states_vector_[3], 10.0);
+                auto next_joint_trajectory = CreateJointTrajectory(joint_states_vector_[joint_states_vector_.size() - 1], 5.0);
+                arm_goal_pose_name_ = "grasp";
+                SendJointTrajectoryGoal(next_joint_trajectory);
+            }
+            else if (arm_goal_pose_name_ == "grasp")
+            {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+                std::vector<double> above_grasp = {(cMRKinematics::state_info_.joint_states[0] > 0.0) ? 0.0 : -0.3,
+                                                   cMRKinematics::state_info_.joint_states[1],
+                                                   cMRKinematics::state_info_.joint_states[2],
+                                                   cMRKinematics::state_info_.joint_states[3],
+                                                   cMRKinematics::state_info_.joint_states[4],
+                                                   cMRKinematics::state_info_.joint_states[5],
+                                                   cMRKinematics::state_info_.joint_states[6]};
+                auto next_joint_trajectory = CreateJointTrajectory(above_grasp, 5.0);
                 arm_goal_pose_name_ = "stop";
-                std::cout << joint_states_vector_[3][0] << std::endl;
-                std::cout << joint_states_vector_[3][0] << std::endl;
-                std::cout << joint_states_vector_[3][0] << std::endl;
-                std::cout << joint_states_vector_[3][0] << std::endl;
-                std::cout << joint_states_vector_[3][0] << std::endl;
-                std::cout << joint_states_vector_[3][0] << std::endl;
-                std::cout << joint_states_vector_[3][0] << std::endl;
-                std::cout << joint_states_vector_[3][0] << std::endl;
-
                 SendJointTrajectoryGoal(next_joint_trajectory);
             }
             else if (arm_goal_pose_name_ == "stop")
             {
+                proceedToNextViewpoint("nav_pose");
+                previous_c3_ = false;
             }
             break;
         case rclcpp_action::ResultCode::CANCELED:

@@ -28,15 +28,17 @@ namespace cMRKinematics
 
     extern StateInformation state_info_;
 
+    template <int DOF>
     class ArmKinematicsSolver
     {
     private:
-        int dof_num;
+        int dof_num_;
         KDL::Tree robot_tree_;
         KDL::Chain chain_;
+
+        rclcpp::Node::SharedPtr node_;
         std::string root_link_;
         std::string tip_link_;
-        rclcpp::Node::SharedPtr node_;
         // KDL::Jacobian jacobian;
 
         // double tolerance;
@@ -53,7 +55,7 @@ namespace cMRKinematics
         KDL::JntArray initial_guess, q;
         // Eigen::Matrix4d pose_6_wrt_0;
         ArmKinematicsSolver(const rclcpp::Node::SharedPtr &node, const std::string &urdf_param,
-                            const std::string &root_link, const std::string &tip_link);
+                            const std::string &root_link, const std::string &tip_link, bool flag = true);
         int GetDOF();
         void SolveFK(const KDL::JntArray &joint_positions);
         bool SolveIK(const KDL::Frame &target_pose);
@@ -62,5 +64,6 @@ namespace cMRKinematics
         // bool SingularityExists(const KDL::JntArray &joint_positions);
     };
 }
+#include "kinematics.tpp"
 
 #endif

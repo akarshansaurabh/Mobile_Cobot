@@ -158,7 +158,7 @@ namespace multi_fcl_loader
                     RCLCPP_WARN(node_->get_logger(), "Non-triangular face in %s. Skipping.", path.c_str());
                     continue;
                 }
-                if (f % 2 == 0)
+                if (f % 5 == 0)
                 {
                     if (path == "/home/akarshan/mobile_cobot_ws/src/r1d1_description/meshes/linear_1.stl")
                     {

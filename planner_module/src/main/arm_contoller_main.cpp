@@ -10,7 +10,7 @@ int main(int argc, char **argv)
     std::string urdf = "robot_description";
     std::string root_link = "base_link";
     std::string tip_link = "ee_link";
-    auto kinematics_solver = std::make_shared<cMRKinematics::ArmKinematicsSolver>(node, urdf, root_link, tip_link);
+    auto kinematics_solver = std::make_shared<cMRKinematics::ArmKinematicsSolver<7>>(node, urdf, root_link, tip_link);
     auto fcl_ = std::make_shared<multi_fcl_loader::MultiThreadedFCLLoader>(node);
     auto collision_objs = fcl_->buildFCLCollisionObjectsInParallel();
     arm_planner::ArmController action_client_obj(node, kinematics_solver, collision_objs);
