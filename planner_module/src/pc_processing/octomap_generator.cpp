@@ -60,6 +60,7 @@ namespace octoMapGenerator
                 octomap.header.stamp = node_->now();
                 octomap.header.frame_id = map_frame_;
                 octomap_pub_->publish(octomap);
+                accumulated_cloud_->points.clear();
                 try
                 {
                     map_to_base_transform = tf_buffer_->lookupTransform("map", "base_link", cloud_time, tf2::durationFromSec(5.0));
@@ -185,8 +186,7 @@ namespace octoMapGenerator
 
         std::vector<std::vector<double>> joint_states_vector = ompl_planner->planPath(request->goal_poses_for_arm.poses[0]);
         std::cout << "ompl planning done" << std::endl;
-        // auto visualizer = std::make_unique<visualization::VisualizationManager>(node_);
-        // visualizer->publishPathWithOrientations(colision_free_path);
+
         std_msgs::msg::Float64MultiArray float_array_msg;
         if (!joint_states_vector.empty())
             for (const auto &joint_states : joint_states_vector)

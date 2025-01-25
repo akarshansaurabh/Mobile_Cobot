@@ -11,6 +11,7 @@ namespace planner_correction
         tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
         cmd_vel_pub_ = node_->create_publisher<geometry_msgs::msg::Twist>("/cmd_vel", 10);
         pc_processing_pub_ = node_->create_publisher<std_msgs::msg::String>("/activate_pc_processing", 10);
+        goal_completion_pub_ = node_->create_publisher<std_msgs::msg::Bool>("/manager_nav2_topic", 10);
         start_odometry_check = correction_is_complete = false;
         table_detection_param_client_ = std::make_shared<rclcpp::AsyncParametersClient>(node_, "/pointcloud_processor_node");
         arm_controller_param_client_ = std::make_shared<rclcpp::AsyncParametersClient>(node_, "/custom_arm_controller_node");
@@ -27,7 +28,11 @@ namespace planner_correction
             {
                 geometry_msgs::msg::Twist cmd_vel;
                 cmd_vel.angular.z = 0.0;
-                cmd_vel_pub_->publish(cmd_vel);
+                for (int i = 0; i < 5; i++)
+                {
+                    cmd_vel_pub_->publish(cmd_vel);
+                    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+                }
                 std::cout << "base actual " << odom_msg_->pose.pose.position.x << " "
                           << odom_msg_->pose.pose.position.y << " "
                           << odom_msg_->pose.pose.position.z << " "
@@ -37,6 +42,10 @@ namespace planner_correction
                           << odom_msg_->pose.pose.orientation.w << " " << std::endl;
                 start_odometry_check = false;
                 correction_is_complete = true;
+
+                std_msgs::msg::Bool completion_msg;
+                completion_msg.data = true;
+                goal_completion_pub_->publish(completion_msg);
                 odometry_check_sub_.reset();
                 std::cout << "subscriber is inactive" << std::endl;
             }
@@ -84,7 +93,7 @@ namespace planner_correction
                     std::string detection = "detect_table";
                     if (publish_data)
                         ActivatePCProcessingParameters(detection);
-                    else
+                    else if (*detection_tracker_ != planner_correction::DetectionTracker::DETECT_NOTHING)
                     {
                         if (*detection_tracker_ == planner_correction::DetectionTracker::DETECT_BOXES)
                             ActivateArm_ForSnapshot();

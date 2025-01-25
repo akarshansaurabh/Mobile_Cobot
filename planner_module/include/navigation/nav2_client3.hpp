@@ -140,6 +140,9 @@ namespace custom_nav2_action_client2
         rclcpp_action::Client<ActionType>::SharedPtr action_client_;
         GoalHandle::SharedPtr goal_handle_;
         bool goal_active_;
+
+        geometry_msgs::msg::PoseStamped nav_to_pose_actual_pose_;
+        std::shared_ptr<planner_correction::AMRCorrection> amr_correction_;
     };
 
     // Separate class for non-action functionalities

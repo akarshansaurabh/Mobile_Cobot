@@ -64,6 +64,7 @@ namespace custom_nav2_action_client2
 
         geometry_msgs::msg::PoseStamped pose = goal_msg.pose;
 
+        // desired orientation and desired yaw
         tf2::Quaternion tf_quat;
         tf2::fromMsg(pose.pose.orientation, tf_quat);
         double roll, pitch;
@@ -286,8 +287,26 @@ namespace custom_nav2_action_client2
                                                       const std::shared_ptr<const ActionType::Feedback> feedback)
     {
         (void)goal_handle;
-        (void)feedback;
-        // Implement feedback handling if needed
+        // std::cout << " feedback->distance_remaining " << feedback->distance_remaining << std::endl;
+
+        // if (feedback->distance_remaining < 0.3 && feedback->distance_remaining > 0.01)
+        // {
+        //     // std::cout << " feedback->distance_remaining " << feedback->distance_remaining << std::endl;
+        //     nav_to_pose_actual_pose_.pose.position.x = feedback->current_pose.pose.position.x;
+        //     nav_to_pose_actual_pose_.pose.position.y = feedback->current_pose.pose.position.y;
+        //     nav_to_pose_actual_pose_.pose.position.z = feedback->current_pose.pose.position.z;
+        //     nav_to_pose_actual_pose_.pose.orientation.x = feedback->current_pose.pose.orientation.x;
+        //     nav_to_pose_actual_pose_.pose.orientation.y = feedback->current_pose.pose.orientation.y;
+        //     nav_to_pose_actual_pose_.pose.orientation.z = feedback->current_pose.pose.orientation.z;
+        //     nav_to_pose_actual_pose_.pose.orientation.w = feedback->current_pose.pose.orientation.w;
+        //     if (amr_correction_ && !amr_correction_->odometry_check_sub_)
+        //     {
+        //         std::cout << "subs activate" << std::endl;
+        //         amr_correction_->odometry_check_sub_ = node_->create_subscription<nav_msgs::msg::Odometry>(
+        //             "/odom", rclcpp::QoS(10),
+        //             std::bind(&planner_correction::AMRCorrection::OdometryCheckCallback, amr_correction_.get(), std::placeholders::_1));
+        //     }
+        // }
     }
 
     void NavigateThroughPosesClient::ResultCallback(const GoalHandle::WrappedResult &result)

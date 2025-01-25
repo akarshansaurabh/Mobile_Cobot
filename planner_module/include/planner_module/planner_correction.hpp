@@ -17,6 +17,7 @@
 
 #include "geometry_msgs/msg/twist.hpp"
 #include "std_msgs/msg/string.hpp"
+#include "std_msgs/msg/bool.hpp"
 #include "nav_msgs/msg/odometry.hpp"
 
 namespace planner_correction
@@ -43,6 +44,7 @@ namespace planner_correction
 
         rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_pub_;
         rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pc_processing_pub_;
+        rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr goal_completion_pub_;
 
         rclcpp::AsyncParametersClient::SharedPtr table_detection_param_client_;
         rclcpp::AsyncParametersClient::SharedPtr arm_controller_param_client_;

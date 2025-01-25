@@ -71,7 +71,7 @@ namespace collision_free_planning
         // Compute Grasp and Pre Grasp Pose in Base
         Eigen::Matrix4d Tmapbase = Conversions::TransformStamped_2Eigen(map_to_base_transform_);
         Eigen::Matrix4d Tmapbox = Conversions::Pose_2Eigen(box_top_face_pose);
-        Tmapbox(2, 3) += 0.005;
+        Tmapbox(2, 3) += 0.015;
         Eigen::Matrix4d Tbasebox_grasp_pose = Tmapbase.inverse() * Tmapbox;
         Eigen::Vector3d z_cap = -Tbasebox_grasp_pose.block<3, 1>(0, 2);
         Eigen::Vector3d y_cap = Tbasebox_grasp_pose.block<3, 1>(0, 1);
@@ -143,7 +143,6 @@ namespace collision_free_planning
             for (int i = 0; i < num_samples; ++i)
             {
                 double d1 = lower_prismatic + i * step;
-                // std::cout << "d1 " << d1 << std::endl;
                 T_base_slider(2, 3) = 1.1 - d1;
                 auto T_slider_box = T_base_slider.inverse() * Tbasebox_grasp_pose;
                 if (!kinematics_solver_6dof_->SolveIK(Conversions::Transform_2KDL(T_slider_box)))

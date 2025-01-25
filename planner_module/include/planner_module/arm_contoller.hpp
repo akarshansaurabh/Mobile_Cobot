@@ -56,10 +56,10 @@ namespace arm_planner
         std::string arm_goal_pose_name_, yaml_file_;
         geometry_msgs::msg::PoseArray box_6d_poses_;
 
-        rclcpp::Subscription<geometry_msgs::msg::PoseArray>::SharedPtr box_poses_sub_;
+        // rclcpp::Subscription<geometry_msgs::msg::PoseArray>::SharedPtr box_poses_sub_;
 
         rclcpp::Client<custom_interfaces::srv::GoalPoseVector>::SharedPtr colision_free_planner_client;
-        void SendRequestForColisionFreePlanning(const geometry_msgs::msg::PoseArray &box_poses);
+        void SendRequestForColisionFreePlanning(geometry_msgs::msg::PoseArray &box_poses);
         void HandleResponse(rclcpp::Client<custom_interfaces::srv::GoalPoseVector>::SharedFuture future);
 
         rclcpp_action::Client<FollowJointTrajectory>::SharedPtr joint_trajectory_action_client_;
@@ -70,7 +70,7 @@ namespace arm_planner
 
         // Methods
         void SendJointTrajectoryGoal(const trajectory_msgs::msg::JointTrajectory &trajectory);
-        void BoxPosesCallBack(const geometry_msgs::msg::PoseArray::ConstSharedPtr &box_poses_msg);
+        // void BoxPosesCallBack(const geometry_msgs::msg::PoseArray::ConstSharedPtr &box_poses_msg);
         trajectory_msgs::msg::JointTrajectory CreateJointTrajectory(const std::vector<double> &positions, double execution_time);
         vector<double> GetArmGoalPose(const std::string &filename, const std::string &pose_);
 

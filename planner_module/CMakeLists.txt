@@ -56,7 +56,7 @@ add_definitions(${PCL_DEFINITIONS})
 
 
 add_executable(nav2_client3 src/navigation/nav2_client3.cpp src/planner_module/planner_correction.cpp
-              src/planner_module/waypoint_gen.cpp src/main/nav2_main3.cpp)
+              src/planner_module/waypoint_gen.cpp src/main/nav2_main3.cpp src/planner_module/manager.cpp)
 ament_target_dependencies(nav2_client3
   rclcpp
   tf2_ros
