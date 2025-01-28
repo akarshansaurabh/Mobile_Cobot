@@ -43,18 +43,31 @@ namespace arm_planner
 
         yaml_file_ = "/home/akarshan/mobile_cobot_ws/src/r1d1_description/config/arm_poses.yaml";
 
-        octomap_pub_ = node_->create_publisher<sensor_msgs::msg::PointCloud2>(
-            "/octomap_topic_", rclcpp::QoS(10));
-
-        // box_poses_sub_ = node_->create_subscription<geometry_msgs::msg::PoseArray>(
-        //     "/box_poses_topic", rclcpp::QoS(10),
-        //     std::bind(&ArmController::BoxPosesCallBack, this, std::placeholders::_1));
+        octomap_pub_ = node_->create_publisher<sensor_msgs::msg::PointCloud2>("/octomap_topic_", rclcpp::QoS(10));
+        goal_completion_pub_ = node_->create_publisher<std_msgs::msg::Bool>("/arm_goal_completion_topic", 10);
+        arm_goal_by_manager_sub_ = node_->create_subscription<geometry_msgs::msg::Pose>(
+            "/arm_goal_by_manager_topic", rclcpp::QoS(10),
+            std::bind(&ArmController::ManagerCallback, this, std::placeholders::_1));
 
         colision_free_planner_client = node_->create_client<custom_interfaces::srv::GoalPoseVector>("colision_free_planner_service");
 
-        activate_arm_motion_planning_ = false;
-        previous_c3_ = false;
-        subs_callback_rejected_ = false;
+        // activate_arm_motion_planning_ = false;
+        // previous_c3_ = false;
+        // subs_callback_rejected_ = false;
+        ask_manager_to_process = false;
+    }
+
+    void ArmController::ManagerCallback(const geometry_msgs::msg::Pose::ConstSharedPtr &msg)
+    {
+        geometry_msgs::msg::PoseArray goal_poses;
+        goal_poses.poses.push_back(*msg);
+        std::cout << "goal sent to ompl planner" << std::endl;
+        std::cout << "goal sent to ompl planner" << std::endl;
+        std::cout << "goal sent to ompl planner" << std::endl;
+        std::cout << "goal sent to ompl planner" << std::endl;
+        std::cout << "goal sent to ompl planner" << std::endl;
+        std::cout << "goal sent to ompl planner" << std::endl;
+        SendRequestForColisionFreePlanning(goal_poses);
     }
 
     void ArmController::SendRequestForColisionFreePlanning(geometry_msgs::msg::PoseArray &box_poses)
@@ -64,85 +77,18 @@ namespace arm_planner
             RCLCPP_ERROR(node_->get_logger(), "Service 'colision_free_planner_service' not available.");
             return;
         }
-
         auto request = std::make_shared<custom_interfaces::srv::GoalPoseVector::Request>();
-        std::cout << "before sorting" << std::endl;
-        for (const auto &pose_ : box_poses.poses)
-            std::cout << pose_.position.x << " " << pose_.position.y << " " << pose_.position.z << " " << std::endl;
-        auto sequence_generation_lambda = [](geometry_msgs::msg::PoseArray &box_poses)
-        {
-            if (box_poses.poses.empty() || box_poses.poses.size() == 1)
-                return;
-
-            double x_center = 0.0;
-            double y_center = 0.0;
-            for (const auto &pose : box_poses.poses)
-            {
-                x_center += pose.position.x;
-                y_center += pose.position.y;
-            }
-            x_center /= box_poses.poses.size();
-            y_center /= box_poses.poses.size();
-
-            double max_y = -std::numeric_limits<double>::infinity();
-            int index_max_y = -1;
-            for (int i = 0; i < box_poses.poses.size(); ++i)
-            {
-                if (box_poses.poses[i].position.y > max_y)
-                {
-                    max_y = box_poses.poses[i].position.y;
-                    index_max_y = i;
-                }
-            }
-
-            if (index_max_y == -1)
-                return;
-
-            double dx_start = box_poses.poses[index_max_y].position.x - x_center;
-            double dy_start = box_poses.poses[index_max_y].position.y - y_center;
-            double angle_start = std::atan2(dy_start, dx_start);
-
-            std::vector<std::pair<geometry_msgs::msg::Pose, double>> pose_angle_pairs;
-            pose_angle_pairs.reserve(box_poses.poses.size());
-
-            for (const auto &pose : box_poses.poses)
-            {
-                double dx = pose.position.x - x_center;
-                double dy = pose.position.y - y_center;
-                double angle = std::atan2(dy, dx);
-
-                double adjusted_angle = angle - angle_start;
-
-                if (adjusted_angle < 0)
-                    adjusted_angle += 2 * M_PI;
-                pose_angle_pairs.emplace_back(pose, adjusted_angle);
-            }
-
-            std::sort(pose_angle_pairs.begin(), pose_angle_pairs.end(),
-                      [](const std::pair<geometry_msgs::msg::Pose, double> &a,
-                         const std::pair<geometry_msgs::msg::Pose, double> &b) -> bool
-                      {
-                          return a.second < b.second;
-                      });
-
-            for (size_t i = 0; i < box_poses.poses.size(); ++i)
-                box_poses.poses[i] = pose_angle_pairs[i].first;
-        };
-
-        sequence_generation_lambda(box_poses);
-        std::cout << "after sorting" << std::endl;
-        for (const auto &pose_ : box_poses.poses)
-            std::cout << pose_.position.x << " " << pose_.position.y << " " << pose_.position.z << " " << std::endl;
         request->goal_poses_for_arm = box_poses;
         auto future = colision_free_planner_client->async_send_request(request, std::bind(&ArmController::HandleResponse, this, std::placeholders::_1));
     }
+
     void ArmController::HandleResponse(rclcpp::Client<custom_interfaces::srv::GoalPoseVector>::SharedFuture future)
     {
         auto result = future.get();
         joint_states_vector_.clear();
         if (result->reply)
         {
-            if (result->joint_states_vector.size() > 0)
+            if (result->joint_states_vector.size() >= 4)
             {
                 joint_states_vector_.resize(result->joint_states_vector.size());
                 for (int i = 1; i < result->joint_states_vector.size(); i++)
@@ -159,6 +105,16 @@ namespace arm_planner
                 arm_goal_pose_name_ = "pre_grasp";
                 SendJointTrajectoryGoal(next_joint_trajectory);
             }
+            else
+            {
+                std_msgs::msg::Bool msg;
+                msg.data = true;
+                goal_completion_pub_->publish(msg);
+                ask_manager_to_process = false;
+            }
+            /*
+            else, tell manager to process to next
+            */
             RCLCPP_INFO(node_->get_logger(), "Service call succeeded: ");
         }
         else
@@ -166,25 +122,6 @@ namespace arm_planner
             RCLCPP_WARN(node_->get_logger(), "Service call failed: ");
         }
     }
-
-    // void ArmController::BoxPosesCallBack(const geometry_msgs::msg::PoseArray::ConstSharedPtr &box_poses_msg)
-    // {
-    //     // print the poses when activate_arm_motion_planning_ is true;
-    //     box_6d_poses_ = *box_poses_msg;
-    //     if (!activate_arm_motion_planning_)
-    //     {
-    //         std::cout << "rejected" << std::endl;
-    //         subs_callback_rejected_ = true;
-    //         // box_6d_poses_ = *box_poses_msg;
-    //         return;
-    //     }
-    //     /// service call
-    //     // SendRequestForColisionFreePlanning(box_6d_poses_);
-    //     activate_arm_motion_planning_ = false;
-    //     for (const auto &pose : box_poses_msg->poses)
-    //         std::cout << pose.position.x << " " << pose.position.y << " " << pose.position.z << " "
-    //                   << pose.orientation.x << " " << pose.orientation.y << " " << pose.orientation.y << " " << pose.orientation.w << std::endl;
-    // }
 
     // Method to create a joint trajectory
     trajectory_msgs::msg::JointTrajectory ArmController::CreateJointTrajectory(const std::vector<double> &positions, double execution_time)
@@ -366,33 +303,46 @@ namespace arm_planner
             {
                 triggerSnapshotForCurrentViewpoint(false);
                 proceedToNextViewpoint("c2");
-                previous_c3_ = false;
+                // previous_c3_ = false;
             }
             else if (arm_goal_pose_name_ == "c2")
             {
                 triggerSnapshotForCurrentViewpoint(false);
                 proceedToNextViewpoint("c3");
-                previous_c3_ = false;
+                // previous_c3_ = false;
             }
             else if (arm_goal_pose_name_ == "c3")
             {
                 triggerSnapshotForCurrentViewpoint(true);
                 proceedToNextViewpoint("nav_pose");
-                previous_c3_ = true;
+                // previous_c3_ = true;
             }
             else if (arm_goal_pose_name_ == "nav_pose")
             {
-                if (previous_c3_)
+                if (ask_manager_to_process)
                 {
-                    activate_arm_motion_planning_ = true;
+                    std_msgs::msg::Bool msg;
+                    msg.data = true;
+                    goal_completion_pub_->publish(msg);
+                    ask_manager_to_process = false;
                 }
-                previous_c3_ = false;
-                if (subs_callback_rejected_)
-                {
-                    // SendRequestForColisionFreePlanning(box_6d_poses_);
-                    activate_arm_motion_planning_ = false;
-                    subs_callback_rejected_ = false;
-                }
+                /*
+
+                if(true)
+                 tell manager done
+                */
+
+                // if (previous_c3_)
+                // {
+                //     activate_arm_motion_planning_ = true;
+                // }
+                // previous_c3_ = false;
+                // if (subs_callback_rejected_)
+                // {
+                //     // SendRequestForColisionFreePlanning(box_6d_poses_);
+                //     activate_arm_motion_planning_ = false;
+                //     subs_callback_rejected_ = false;
+                // }
             }
             else if (arm_goal_pose_name_ == "pre_grasp")
             {
@@ -411,13 +361,14 @@ namespace arm_planner
                                                    cMRKinematics::state_info_.joint_states[5],
                                                    cMRKinematics::state_info_.joint_states[6]};
                 auto next_joint_trajectory = CreateJointTrajectory(above_grasp, 5.0);
-                arm_goal_pose_name_ = "stop";
+                arm_goal_pose_name_ = "above_grasp";
                 SendJointTrajectoryGoal(next_joint_trajectory);
             }
-            else if (arm_goal_pose_name_ == "stop")
+            else if (arm_goal_pose_name_ == "above_grasp")
             {
                 proceedToNextViewpoint("nav_pose");
-                previous_c3_ = false;
+                // previous_c3_ = false;
+                ask_manager_to_process = true;
             }
             break;
         case rclcpp_action::ResultCode::CANCELED:

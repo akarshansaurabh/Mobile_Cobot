@@ -5,6 +5,7 @@
 #include <geometry_msgs/msg/pose.hpp>
 #include <geometry_msgs/msg/point.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
+#include <std_msgs/msg/bool.hpp>
 
 #include <tf2_ros/buffer.h>
 #include <tf2_ros/transform_listener.h>
@@ -105,6 +106,7 @@ namespace octoMapGenerator
         std::shared_ptr<octomap::OcTree> octree_;
         rclcpp::Service<custom_interfaces::srv::GoalPoseVector>::SharedPtr colision_free_planner_server_;
         std::vector<std::shared_ptr<fcl::CollisionObjectf>> link_collision_objects_;
+        rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr clear_octamap_sub_;
 
         std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
         std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
@@ -112,6 +114,7 @@ namespace octoMapGenerator
 
         void ServerCallbackForColisionFreePlanning(const std::shared_ptr<custom_interfaces::srv::GoalPoseVector::Request> request,
                                                    std::shared_ptr<custom_interfaces::srv::GoalPoseVector::Response> response);
+        void ClearOctomapCallBack(const std_msgs::msg::Bool::ConstSharedPtr &box_poses_msg);
 
     public:
         OctoMapGenerator(const rclcpp::Node::SharedPtr &node, const std::shared_ptr<cMRKinematics::ArmKinematicsSolver<7>> &kinematics_solver,

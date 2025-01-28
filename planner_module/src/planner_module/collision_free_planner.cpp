@@ -7,30 +7,6 @@
 
 namespace collision_free_planning
 {
-    // struct MyCollisionCallback : public fcl::BroadPhaseCollisionManagerf::CollisionCallBack
-    // {
-    //     bool *collisionFound; // we store a pointer to indicate if collision was found
-    //     MyCollisionCallback(bool *found) : collisionFound(found) {}
-
-    //     bool collisionCallback(fcl::CollisionObjectf *obj1,
-    //                            fcl::CollisionObjectf *obj2) override
-    //     {
-    //         fcl::CollisionRequestf request;
-    //         request.num_max_contacts = 1;
-    //         request.enable_contact = false;
-    //         request.enable_cost = false;
-    //         fcl::CollisionResultf result;
-
-    //         fcl::collide(obj1, obj2, request, result);
-    //         if (result.isCollision())
-    //         {
-    //             *collisionFound = true;
-    //             return true;
-    //         }
-    //         return false; // false => continue checking
-    //     }
-    // };
-
     CollisionFreePlanner::CollisionFreePlanner(const std::shared_ptr<rclcpp::Node> &node,
                                                const std::shared_ptr<octomap::OcTree> &octree,
                                                const std::shared_ptr<cMRKinematics::ArmKinematicsSolver<7>> &kinematics_solver,
@@ -47,15 +23,6 @@ namespace collision_free_planning
 
         std::shared_ptr<fcl::OcTreef> fcl_octree = std::make_shared<fcl::OcTreef>(octree_);
         environment_collision_ = std::make_shared<fcl::CollisionObjectf>(fcl_octree);
-
-        // manager_ = std::make_shared<fcl::DynamicAABBTreeCollisionManagerf>();
-        // manager_->registerObject(environment_collision_.get());
-        // for (auto &link_obj : link_collision_objects_)
-        //     manager_->registerObject(link_obj.get());
-        // manager_->setup();
-        // RCLCPP_INFO(node_->get_logger(),
-        //             "[CollisionFreePlanner] FCL broad-phase manager created with %zu link objs + 1 environment.",
-        //             link_collision_objects_.size());
     }
 
     std::vector<std::vector<double>> CollisionFreePlanner::planPath(const geometry_msgs::msg::Pose &box_top_face_pose)
@@ -71,7 +38,7 @@ namespace collision_free_planning
         // Compute Grasp and Pre Grasp Pose in Base
         Eigen::Matrix4d Tmapbase = Conversions::TransformStamped_2Eigen(map_to_base_transform_);
         Eigen::Matrix4d Tmapbox = Conversions::Pose_2Eigen(box_top_face_pose);
-        Tmapbox(2, 3) += 0.015;
+        Tmapbox(2, 3) += 0.025;
         Eigen::Matrix4d Tbasebox_grasp_pose = Tmapbase.inverse() * Tmapbox;
         Eigen::Vector3d z_cap = -Tbasebox_grasp_pose.block<3, 1>(0, 2);
         Eigen::Vector3d y_cap = Tbasebox_grasp_pose.block<3, 1>(0, 1);
@@ -143,10 +110,36 @@ namespace collision_free_planning
             for (int i = 0; i < num_samples; ++i)
             {
                 double d1 = lower_prismatic + i * step;
+                std::cout << "d1 - " << d1 << std::endl;
                 T_base_slider(2, 3) = 1.1 - d1;
                 auto T_slider_box = T_base_slider.inverse() * Tbasebox_grasp_pose;
                 if (!kinematics_solver_6dof_->SolveIK(Conversions::Transform_2KDL(T_slider_box)))
                     continue;
+                std::vector<double> ik = {kinematics_solver_6dof_->q(0),
+                                          kinematics_solver_6dof_->q(1),
+                                          kinematics_solver_6dof_->q(2),
+                                          kinematics_solver_6dof_->q(3),
+                                          kinematics_solver_6dof_->q(4),
+                                          kinematics_solver_6dof_->q(5)};
+                for (const auto &v : ik)
+                    std::cout << v << " ";
+                std::cout << "" << std::endl;
+                bool outside_bound = std::any_of(ik.begin(), ik.end(),
+                                                 [](double joint_value) -> bool
+                                                 {
+                                                     return std::abs(joint_value) > 3.14;
+                                                 });
+                if (outside_bound)
+                {
+                    std::cout << "ik solved but outside bound" << std::endl;
+                    kinematics_solver_6dof_->initial_guess(0) = 1.396;
+                    kinematics_solver_6dof_->initial_guess(1) = -1.15;
+                    kinematics_solver_6dof_->initial_guess(2) = -0.65;
+                    kinematics_solver_6dof_->initial_guess(3) = 1.5;
+                    kinematics_solver_6dof_->initial_guess(4) = 0.5;
+                    kinematics_solver_6dof_->initial_guess(5) = -1.5;
+                    continue;
+                }
 
                 KDL::JntArray candidate_7dof(7);
                 ob::ScopedState<ob::RealVectorStateSpace> st(space);
@@ -156,6 +149,7 @@ namespace collision_free_planning
 
                 if (isStateValid(st.get()))
                 {
+                    std::cout << "collision free IK found" << std::endl;
                     found_collision_free = true;
                     for (int idx = 0; idx < 7; idx++)
                         grasp_positions(idx) = candidate_7dof(idx);
@@ -309,7 +303,9 @@ namespace collision_free_planning
 
         if (solved)
         {
+            std::cout << "simplification sarted" << std::endl;
             ss.simplifySolution();
+            std::cout << "simplification done" << std::endl;
 
             auto path_geometric = ss.getSolutionPath().as<og::PathGeometric>();
             for (std::size_t i = 0; i < path_geometric->getStateCount(); i++)

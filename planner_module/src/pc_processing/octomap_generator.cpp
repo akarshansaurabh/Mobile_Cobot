@@ -60,25 +60,6 @@ namespace octoMapGenerator
                 octomap.header.stamp = node_->now();
                 octomap.header.frame_id = map_frame_;
                 octomap_pub_->publish(octomap);
-                accumulated_cloud_->points.clear();
-                try
-                {
-                    map_to_base_transform = tf_buffer_->lookupTransform("map", "base_link", cloud_time, tf2::durationFromSec(5.0));
-                    std::cout << "base at the time of snapshot " << map_to_base_transform.transform.translation.x << " "
-                              << map_to_base_transform.transform.translation.y << " "
-                              << map_to_base_transform.transform.translation.z << " "
-                              << map_to_base_transform.transform.rotation.x << " "
-                              << map_to_base_transform.transform.rotation.y << " "
-                              << map_to_base_transform.transform.rotation.z << " "
-                              << map_to_base_transform.transform.rotation.w << " " << std::endl;
-                }
-                catch (tf2::ExtrapolationException &ex)
-                {
-                    RCLCPP_WARN(node_->get_logger(),
-                                "No Base.",
-                                cloud_time.seconds());
-                    return;
-                }
                 SendRequestFor6DPoseEstimation(0.1, octomap);
             }
 
@@ -171,16 +152,44 @@ namespace octoMapGenerator
         colision_free_planner_server_ = node_->create_service<custom_interfaces::srv::GoalPoseVector>(
             "colision_free_planner_service", std::bind(&OctoMapGenerator::ServerCallbackForColisionFreePlanning,
                                                        this, std::placeholders::_1, std::placeholders::_2));
+
+        clear_octamap_sub_ = node_->create_subscription<std_msgs::msg::Bool>(
+            "/clear_octamap_topic", rclcpp::QoS(10),
+            std::bind(&OctoMapGenerator::ClearOctomapCallBack, this, std::placeholders::_1));
+
         octree_ = nullptr;
 
         tf_buffer_ = std::make_shared<tf2_ros::Buffer>(node_->get_clock());
         tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
     }
 
+    void OctoMapGenerator::ClearOctomapCallBack(const std_msgs::msg::Bool::ConstSharedPtr &box_poses_msg)
+    {
+        accumulated_cloud_->points.clear();
+    }
+
     void OctoMapGenerator::ServerCallbackForColisionFreePlanning(const std::shared_ptr<custom_interfaces::srv::GoalPoseVector::Request> request,
                                                                  std::shared_ptr<custom_interfaces::srv::GoalPoseVector::Response> response)
     {
         buildOctomap(accumulated_cloud_);
+        try
+        {
+            map_to_base_transform = tf_buffer_->lookupTransform("map", "base_link", tf2::TimePointZero, tf2::durationFromSec(5.0));
+            std::cout << "base at the time of snapshot " << map_to_base_transform.transform.translation.x << " "
+                      << map_to_base_transform.transform.translation.y << " "
+                      << map_to_base_transform.transform.translation.z << " "
+                      << map_to_base_transform.transform.rotation.x << " "
+                      << map_to_base_transform.transform.rotation.y << " "
+                      << map_to_base_transform.transform.rotation.z << " "
+                      << map_to_base_transform.transform.rotation.w << " " << std::endl;
+        }
+        catch (tf2::ExtrapolationException &ex)
+        {
+            RCLCPP_WARN(node_->get_logger(),
+                        "Map to base transform not found");
+            response->reply = true;
+            return;
+        }
         auto ompl_planner = std::make_unique<collision_free_planning::CollisionFreePlanner>(node_, octree_, kinematics_solver_, map_to_base_transform,
                                                                                             link_collision_objects_);
 
@@ -195,7 +204,6 @@ namespace octoMapGenerator
                 response->joint_states_vector.push_back(float_array_msg);
             }
         response->reply = true;
-        accumulated_cloud_->points.clear();
     }
 
     void OctoMapGenerator::buildOctomap(const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &pcl_cloud, double resolution)

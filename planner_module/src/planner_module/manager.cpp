@@ -1,4 +1,5 @@
 #include "planner_module/manager.hpp"
+#include "maths/commonmathssolver.hpp"
 
 namespace manager
 {
@@ -19,10 +20,22 @@ namespace manager
             "/manager_nav2_topic", rclcpp::QoS(10),
             std::bind(&Manager::GoalCompletionCallBack, this, std::placeholders::_1));
 
+        arm_goal_completion_sub_ = node_->create_subscription<std_msgs::msg::Bool>(
+            "/arm_goal_completion_topic", rclcpp::QoS(10),
+            std::bind(&Manager::ArmGoalCompletionCallBack, this, std::placeholders::_1));
+
+        arm_goal_by_manager_pub_ = node_->create_publisher<geometry_msgs::msg::Pose>("/arm_goal_by_manager_topic", 10);
+        clear_octamap_pub_ = node_->create_publisher<std_msgs::msg::Bool>("/clear_octamap_topic", 10);
+
+        goal_index_tracker_.current_amr_pose_index = 0;
+        goal_index_tracker_.current_arm_pose_index = 0;
+        box_poses_.poses.clear();
+
         RCLCPP_INFO(node_->get_logger(), "[Manager] Manager constructed.");
     }
 
-    void Manager::GoalCompletionCallBack(const std_msgs::msg::Bool::ConstSharedPtr &box_poses_msg)
+    // after nth arm goal completion, goal_index_tracker_.current_arm_pose_index = n
+    void Manager::ArmGoalCompletionCallBack(const std_msgs::msg::Bool::ConstSharedPtr &msg)
     {
         if (!all_waypoints.empty())
             all_waypoints.erase(all_waypoints.begin());
@@ -32,6 +45,42 @@ namespace manager
             goal_msg.pose = all_waypoints[0];
             goal_msg.behavior_tree = "";
             navigate_to_pose_client_.SendGoal(goal_msg);
+            goal_index_tracker_.current_amr_pose_index++;
+        }
+        if (goal_index_tracker_.current_arm_pose_index == box_poses_.poses.size())
+        {
+            std::cout << "all arm goals handled, hence clearing octomap" << std::endl;
+            std_msgs::msg::Bool msg;
+            msg.data = true;
+            clear_octamap_pub_->publish(msg);
+        }
+        std::cout << "size after removing " << all_waypoints.size() << std::endl;
+    }
+
+    void Manager::GoalCompletionCallBack(const std_msgs::msg::Bool::ConstSharedPtr &box_poses_msg)
+    {
+        if (goal_index_tracker_.current_amr_pose_index % 3 == 0)
+        {
+            if (!box_poses_.poses.empty())
+            {
+                geometry_msgs::msg::Pose msg;
+                msg = box_poses_.poses[goal_index_tracker_.current_arm_pose_index];
+                arm_goal_by_manager_pub_->publish(msg);
+                goal_index_tracker_.current_arm_pose_index++;
+                std::cout << "goal is sent to arm bt manager" << std::endl;
+            }
+            return;
+        }
+
+        if (!all_waypoints.empty())
+            all_waypoints.erase(all_waypoints.begin());
+        if (!all_waypoints.empty())
+        {
+            nav2_msgs::action::NavigateToPose::Goal goal_msg;
+            goal_msg.pose = all_waypoints[0];
+            goal_msg.behavior_tree = "";
+            navigate_to_pose_client_.SendGoal(goal_msg);
+            goal_index_tracker_.current_amr_pose_index++;
         }
         std::cout << "size after removing " << all_waypoints.size() << std::endl;
     }
@@ -127,16 +176,17 @@ namespace manager
             Eigen::Quaterniond eigen_quat(current_orientation.w, current_orientation.x,
                                           current_orientation.y, current_orientation.z);
             Eigen::Matrix3d eigen_rot = eigen_quat.toRotationMatrix();
-            auto rot_z_lambda = [](double t)
-                -> Eigen::Matrix3d
-            {
-                Eigen::Matrix3d rz;
-                rz << cos(t), -sin(t), 0,
-                    sin(t), cos(t), 0,
-                    0, 0, 1;
-                return rz;
-            };
-            Eigen::Matrix3d goal_rot = eigen_rot * rot_z_lambda(tz);
+            // auto rot_z_lambda = [](double t)
+            //     -> Eigen::Matrix3d
+            // {
+            //     Eigen::Matrix3d rz;
+            //     rz << cos(t), -sin(t), 0,
+            //         sin(t), cos(t), 0,
+            //         0, 0, 1;
+            //     return rz;
+            // };
+            // Eigen::Matrix3d goal_rot = eigen_rot * rot_z_lambda(tz);
+            Eigen::Matrix3d goal_rot = eigen_rot * CommonMathsSolver::OrientationNTransformaton::Compute_Rz(tz);
             Eigen::Quaterniond goal_orientation(goal_rot);
             geometry_msgs::msg::Quaternion ans;
             ans.x = goal_orientation.x();
@@ -151,34 +201,41 @@ namespace manager
             double box_y = box_poses_.poses[i].position.y;
             double diff = (box_y - current_y);
 
-            if (diff > 0.0 && i == 0) // +90,F,-90
+            if (i == 0 && diff > 0.0) // +90,F,-90
             {
                 std::cout << "plus plus plus plus plus plus plus plus plus " << std::endl;
                 auto plus_90 = orientation_lambda(current_robot_pose.pose.orientation, 1.57);
                 auto original_orientation = orientation_lambda(plus_90, 0.0);
                 auto minus_90 = orientation_lambda(original_orientation, -1.57);
 
-                auto pose1 = createPose(current_robot_pose, current_y, plus_90);
-                auto pose2 = createPose(current_robot_pose, box_y + 0.4, original_orientation);
-                auto pose3 = createPose(current_robot_pose, box_y + 0.4, minus_90);
+                auto pose1 = createPose(current_robot_pose, current_robot_pose.pose.position.x, current_y, plus_90);
+                auto pose2 = createPose(current_robot_pose, current_robot_pose.pose.position.x, box_y + 0.4, original_orientation);
+                auto pose3 = createPose(current_robot_pose, current_robot_pose.pose.position.x, box_y + 0.4, minus_90);
                 all_waypoints.push_back(pose1);
                 all_waypoints.push_back(pose2);
                 all_waypoints.push_back(pose3);
             }
-            else // -90,F,+90
+            else // if (i == 0 && diff <= 0.0) // -90,F,+90
             {
                 std::cout << "minus minus minus minus minus minus minus minus minus " << std::endl;
                 auto minus_90 = orientation_lambda(current_robot_pose.pose.orientation, -1.57);
                 auto original_orientation = orientation_lambda(minus_90, 0.0);
                 auto plus_90 = orientation_lambda(original_orientation, 1.57);
 
-                auto pose1 = createPose(current_robot_pose, current_y, minus_90);
-                auto pose2 = createPose(current_robot_pose, box_y - 0.3, original_orientation);
-                auto pose3 = createPose(current_robot_pose, box_y - 0.3, plus_90);
+                auto pose1 = createPose(current_robot_pose, current_robot_pose.pose.position.x, current_y, minus_90);
+                auto pose2 = createPose(current_robot_pose, current_robot_pose.pose.position.x, box_y - 0.3, original_orientation);
+                auto pose3 = createPose(current_robot_pose, current_robot_pose.pose.position.x, box_y - 0.3, plus_90);
                 all_waypoints.push_back(pose1);
                 all_waypoints.push_back(pose2);
                 all_waypoints.push_back(pose3);
             }
+            // else if (i > 0)
+            // {
+            //     /*
+            //     if box close to AB, above logic
+            //     if box close to BC, new logic
+            //     */
+            // }
             current_robot_pose.pose = all_waypoints.back().pose;
         }
 
@@ -192,6 +249,7 @@ namespace manager
         goal_msg.pose = all_waypoints[0];
         goal_msg.behavior_tree = "";
         navigate_to_pose_client_.SendGoal(goal_msg);
+        goal_index_tracker_.current_amr_pose_index++;
     }
 
     geometry_msgs::msg::PoseStamped Manager::getCurrentRobotPose()
@@ -205,10 +263,11 @@ namespace manager
     }
 
     // reference_pose is current pose
-    geometry_msgs::msg::PoseStamped Manager::createPose(const geometry_msgs::msg::PoseStamped &reference_pose,
+    geometry_msgs::msg::PoseStamped Manager::createPose(const geometry_msgs::msg::PoseStamped &reference_pose, double new_x,
                                                         double new_y, const geometry_msgs::msg::Quaternion &new_orientation)
     {
         geometry_msgs::msg::PoseStamped result_pose = reference_pose;
+        result_pose.pose.position.x = new_x;
         result_pose.pose.position.y = new_y;
         result_pose.pose.orientation = new_orientation;
         result_pose.header.stamp = node_->now();

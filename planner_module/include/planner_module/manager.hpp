@@ -21,6 +21,11 @@
 
 namespace manager
 {
+    struct GoalIndexTracker
+    {
+        int num_of_boxes, current_amr_pose_index, current_arm_pose_index;
+    };
+
     class Manager
     {
     public:
@@ -31,12 +36,15 @@ namespace manager
         void GenerateWaypointsAndSend_1stGoal();
 
     private:
+        GoalIndexTracker goal_index_tracker_;
+
         geometry_msgs::msg::PoseStamped getCurrentRobotPose();
-        geometry_msgs::msg::PoseStamped createPose(const geometry_msgs::msg::PoseStamped &reference_pose,
+        geometry_msgs::msg::PoseStamped createPose(const geometry_msgs::msg::PoseStamped &reference_pose, double new_x,
                                                    double new_y, const geometry_msgs::msg::Quaternion &new_orientation);
 
         void BoxPosesCallBack(const geometry_msgs::msg::PoseArray::ConstSharedPtr &box_poses_msg);
         void GoalCompletionCallBack(const std_msgs::msg::Bool::ConstSharedPtr &box_poses_msg);
+        void ArmGoalCompletionCallBack(const std_msgs::msg::Bool::ConstSharedPtr &msg);
 
         rclcpp::Node::SharedPtr node_;
         custom_nav2_action_client2::NavigateThroughPosesClient &navigate_through_poses_client_;
@@ -45,8 +53,12 @@ namespace manager
 
         geometry_msgs::msg::PoseArray box_poses_;
         std::vector<geometry_msgs::msg::PoseStamped> all_waypoints;
+
         rclcpp::Subscription<geometry_msgs::msg::PoseArray>::SharedPtr box_poses_sub_;
         rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr goal_completion_sub_;
+        rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr arm_goal_completion_sub_;
+        rclcpp::Publisher<geometry_msgs::msg::Pose>::SharedPtr arm_goal_by_manager_pub_;
+        rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr clear_octamap_pub_;
     };
 }
 

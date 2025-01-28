@@ -26,6 +26,9 @@
 #include <tf2_eigen/tf2_eigen.hpp>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 
+#include "std_msgs/msg/bool.hpp"
+#include "geometry_msgs/msg/pose.hpp"
+
 using namespace std;
 using namespace std::placeholders;
 using namespace std::chrono_literals;
@@ -51,13 +54,18 @@ namespace arm_planner
         std::shared_ptr<visualization::VisualizationManager> viz_manager_;
 
         std::vector<std::shared_ptr<fcl::CollisionObjectf>> collision_objects_;
+
         std::atomic<bool> activate_arm_motion_planning_, previous_c3_, subs_callback_rejected_;
+        std::atomic<bool> ask_manager_to_process;
+
         GoalHandleFollowJointTrajectory::SharedPtr arm_goal_hangle_;
         std::string arm_goal_pose_name_, yaml_file_;
         geometry_msgs::msg::PoseArray box_6d_poses_;
 
-        // rclcpp::Subscription<geometry_msgs::msg::PoseArray>::SharedPtr box_poses_sub_;
+        rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr goal_completion_pub_;
+        rclcpp::Subscription<geometry_msgs::msg::Pose>::SharedPtr arm_goal_by_manager_sub_;
 
+        void ManagerCallback(const geometry_msgs::msg::Pose::ConstSharedPtr &msg);
         rclcpp::Client<custom_interfaces::srv::GoalPoseVector>::SharedPtr colision_free_planner_client;
         void SendRequestForColisionFreePlanning(geometry_msgs::msg::PoseArray &box_poses);
         void HandleResponse(rclcpp::Client<custom_interfaces::srv::GoalPoseVector>::SharedFuture future);
