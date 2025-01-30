@@ -50,23 +50,14 @@ namespace arm_planner
             std::bind(&ArmController::ManagerCallback, this, std::placeholders::_1));
 
         colision_free_planner_client = node_->create_client<custom_interfaces::srv::GoalPoseVector>("colision_free_planner_service");
-
-        // activate_arm_motion_planning_ = false;
-        // previous_c3_ = false;
-        // subs_callback_rejected_ = false;
         ask_manager_to_process = false;
+        current_ompl_index = 0;
     }
 
     void ArmController::ManagerCallback(const geometry_msgs::msg::Pose::ConstSharedPtr &msg)
     {
         geometry_msgs::msg::PoseArray goal_poses;
         goal_poses.poses.push_back(*msg);
-        std::cout << "goal sent to ompl planner" << std::endl;
-        std::cout << "goal sent to ompl planner" << std::endl;
-        std::cout << "goal sent to ompl planner" << std::endl;
-        std::cout << "goal sent to ompl planner" << std::endl;
-        std::cout << "goal sent to ompl planner" << std::endl;
-        std::cout << "goal sent to ompl planner" << std::endl;
         SendRequestForColisionFreePlanning(goal_poses);
     }
 
@@ -90,8 +81,16 @@ namespace arm_planner
         {
             if (result->joint_states_vector.size() >= 4)
             {
+                num_of_ompl_waypoints = result->joint_states_vector.size();
+                std::cout << "num_of_ompl_waypoints = " << num_of_ompl_waypoints << std::endl;
+                std::cout << "num_of_ompl_waypoints = " << num_of_ompl_waypoints << std::endl;
+                std::cout << "num_of_ompl_waypoints = " << num_of_ompl_waypoints << std::endl;
+                std::cout << "num_of_ompl_waypoints = " << num_of_ompl_waypoints << std::endl;
+                std::cout << "num_of_ompl_waypoints = " << num_of_ompl_waypoints << std::endl;
+                std::cout << "num_of_ompl_waypoints = " << num_of_ompl_waypoints << std::endl;
+                std::cout << "num_of_ompl_waypoints = " << num_of_ompl_waypoints << std::endl;
                 joint_states_vector_.resize(result->joint_states_vector.size());
-                for (int i = 1; i < result->joint_states_vector.size(); i++)
+                for (int i = 0; i < result->joint_states_vector.size(); i++)
                 {
                     joint_states_vector_[i].push_back(result->joint_states_vector[i].data[0]);
                     joint_states_vector_[i].push_back(result->joint_states_vector[i].data[1]);
@@ -101,8 +100,8 @@ namespace arm_planner
                     joint_states_vector_[i].push_back(result->joint_states_vector[i].data[5]);
                     joint_states_vector_[i].push_back(result->joint_states_vector[i].data[6]);
                 }
-                auto next_joint_trajectory = CreateJointTrajectory(result->joint_states_vector[1].data, 3.0);
-                arm_goal_pose_name_ = "pre_grasp";
+                auto next_joint_trajectory = CreateJointTrajectory(result->joint_states_vector[0].data, 3.0);
+                arm_goal_pose_name_ = "ompl_1";
                 SendJointTrajectoryGoal(next_joint_trajectory);
             }
             else
@@ -257,7 +256,7 @@ namespace arm_planner
     {
         arm_goal_pose_name_ = str;
         std::vector<double> arm_goal_positions = GetArmGoalPose(yaml_file_, str);
-        trajectory_msgs::msg::JointTrajectory arm_goal = CreateJointTrajectory(arm_goal_positions, 1.0);
+        trajectory_msgs::msg::JointTrajectory arm_goal = CreateJointTrajectory(arm_goal_positions, (str == "nav_pose") ? 4.0 : 1.0);
         this->SendJointTrajectoryGoal(arm_goal);
     }
 
@@ -319,53 +318,53 @@ namespace arm_planner
             }
             else if (arm_goal_pose_name_ == "nav_pose")
             {
-                if (ask_manager_to_process)
+                // if (ask_manager_to_process)
+                // {
+                //     std_msgs::msg::Bool msg;
+                //     msg.data = true;
+                //     current_ompl_index = 0;
+                //     goal_completion_pub_->publish(msg);
+                //     ask_manager_to_process = false;
+                // }
+            }
+            else if (arm_goal_pose_name_ == "ompl_1")
+            {
+                current_ompl_index++;
+                auto next_joint_trajectory = CreateJointTrajectory(joint_states_vector_[current_ompl_index], 4.0);
+                arm_goal_pose_name_ = "ompl_next";
+                SendJointTrajectoryGoal(next_joint_trajectory);
+            }
+            else if (arm_goal_pose_name_ == "ompl_next")
+            {
+                current_ompl_index++;
+                if (current_ompl_index < num_of_ompl_waypoints)
                 {
-                    std_msgs::msg::Bool msg;
-                    msg.data = true;
-                    goal_completion_pub_->publish(msg);
-                    ask_manager_to_process = false;
+                    auto next_joint_trajectory = CreateJointTrajectory(joint_states_vector_[current_ompl_index], 4.0);
+                    arm_goal_pose_name_ = "ompl_next";
+                    SendJointTrajectoryGoal(next_joint_trajectory);
                 }
-                /*
-
-                if(true)
-                 tell manager done
-                */
-
-                // if (previous_c3_)
-                // {
-                //     activate_arm_motion_planning_ = true;
-                // }
-                // previous_c3_ = false;
-                // if (subs_callback_rejected_)
-                // {
-                //     // SendRequestForColisionFreePlanning(box_6d_poses_);
-                //     activate_arm_motion_planning_ = false;
-                //     subs_callback_rejected_ = false;
-                // }
-            }
-            else if (arm_goal_pose_name_ == "pre_grasp")
-            {
-                auto next_joint_trajectory = CreateJointTrajectory(joint_states_vector_[joint_states_vector_.size() - 1], 5.0);
-                arm_goal_pose_name_ = "grasp";
-                SendJointTrajectoryGoal(next_joint_trajectory);
-            }
-            else if (arm_goal_pose_name_ == "grasp")
-            {
-                std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-                std::vector<double> above_grasp = {(cMRKinematics::state_info_.joint_states[0] > 0.0) ? 0.0 : -0.3,
-                                                   cMRKinematics::state_info_.joint_states[1],
-                                                   cMRKinematics::state_info_.joint_states[2],
-                                                   cMRKinematics::state_info_.joint_states[3],
-                                                   cMRKinematics::state_info_.joint_states[4],
-                                                   cMRKinematics::state_info_.joint_states[5],
-                                                   cMRKinematics::state_info_.joint_states[6]};
-                auto next_joint_trajectory = CreateJointTrajectory(above_grasp, 5.0);
-                arm_goal_pose_name_ = "above_grasp";
-                SendJointTrajectoryGoal(next_joint_trajectory);
+                else
+                {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+                    std::vector<double> above_grasp = {(cMRKinematics::state_info_.joint_states[0] > 0.0) ? 0.0 : -0.3,
+                                                       cMRKinematics::state_info_.joint_states[1],
+                                                       cMRKinematics::state_info_.joint_states[2],
+                                                       cMRKinematics::state_info_.joint_states[3],
+                                                       cMRKinematics::state_info_.joint_states[4],
+                                                       cMRKinematics::state_info_.joint_states[5],
+                                                       cMRKinematics::state_info_.joint_states[6]};
+                    auto next_joint_trajectory = CreateJointTrajectory(above_grasp, 4.0);
+                    arm_goal_pose_name_ = "above_grasp";
+                    SendJointTrajectoryGoal(next_joint_trajectory);
+                }
             }
             else if (arm_goal_pose_name_ == "above_grasp")
             {
+                std_msgs::msg::Bool msg;
+                msg.data = true;
+                current_ompl_index = 0;
+                goal_completion_pub_->publish(msg);
+
                 proceedToNextViewpoint("nav_pose");
                 // previous_c3_ = false;
                 ask_manager_to_process = true;

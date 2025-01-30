@@ -47,6 +47,7 @@ namespace arm_planner
 
     private:
         rclcpp::Node::SharedPtr node_;
+        int num_of_ompl_waypoints, current_ompl_index;
 
         // composition
         std::shared_ptr<octoMapGenerator::OctoMapGenerator> octoMap_generator_;

@@ -4,6 +4,7 @@
 #include <vector>
 #include <cmath>
 #include <eigen3/Eigen/Dense>
+#include <geometry_msgs/msg/point.hpp>
 
 using namespace std;
 
@@ -14,6 +15,7 @@ namespace CommonMathsSolver
     namespace Vectors3D
     {
         Eigen::Vector3d FindUnitNormal(const Eigen::Vector3d &p1, const Eigen::Vector3d &p2, const Eigen::Vector3d &p3);
+        double AngleBetween(const Eigen::Vector3d &v1, const Eigen::Vector3d &v2);
     }
     namespace OrientationNTransformaton
     {
@@ -26,6 +28,8 @@ namespace CommonMathsSolver
     namespace Geometry
     {
         double Distance2P(const Eigen::Vector4d &P1, const Eigen::Vector4d &P2);
+        bool isPointOutsideRectangle(const geometry_msgs::msg::Point &P, const std::vector<geometry_msgs::msg::Point> &table_vertices);
+        double ComputePerpendicularDistance(const geometry_msgs::msg::Point &box, const geometry_msgs::msg::Point &A, const geometry_msgs::msg::Point &B);
     }
     namespace MaxMin
     {
@@ -36,4 +40,4 @@ namespace CommonMathsSolver
 
 #endif
 
-// header = 1170 + 
+// header = 1170 +

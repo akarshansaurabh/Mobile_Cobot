@@ -40,6 +40,8 @@ namespace pointcloud_processing
             "/move_amr_topic", rclcpp::QoS(10));
         box_poses_pub = this->create_publisher<geometry_msgs::msg::PoseArray>(
             "/box_poses_topic", rclcpp::QoS(10));
+        table_vertices_pub = this->create_publisher<geometry_msgs::msg::Polygon>(
+            "/table_vertices_topic", rclcpp::QoS(10));
 
         box6dposes_server_ = this->create_service<custom_interfaces::srv::BoxposeEstimator>(
             "six_d_pose_estimate_service",
@@ -386,6 +388,7 @@ namespace pointcloud_processing
             // compute the distance and send it to client
             if (table_detection_counter_ == 1)
             {
+                // calculate forward desired dis robot should based on its current position and table vertices
                 geometry_msgs::msg::Point robot_position;
                 geometry_msgs::msg::TransformStamped transform_stamped;
                 try
@@ -403,6 +406,100 @@ namespace pointcloud_processing
                 robot_position.z = transform_stamped.transform.translation.z;
                 geometry_msgs::msg::Vector3 msg_ = way_point_generator_->ComputeDesiredForwardDistance(table_vertices, robot_position);
                 move_amr_pub_->publish(msg_);
+
+                // sort table vertices in anti-clockwsie with 1st point having x_min,y_max
+                auto sortTableVerticesAntiClockwise = [this]()
+                {
+                    if (table_vertices.size() != 4)
+                        std::cerr << "Error: table_vertices must contain exactly 4 poses." << std::endl;
+                    else
+                    {
+                        // Step 1: Find the starting vertex with min x and max y
+                        int starting_index = -1;
+                        double min_x = std::numeric_limits<double>::infinity();
+                        double max_y = -std::numeric_limits<double>::infinity();
+
+                        for (int i = 0; i < table_vertices.size(); ++i)
+                        {
+                            double x = table_vertices[i].x;
+                            double y = table_vertices[i].y;
+                            if (x < min_x || (fabs(x - min_x) < 0.001 && y > max_y))
+                            {
+                                min_x = x;
+                                max_y = y;
+                                starting_index = i;
+                            }
+                        }
+                        std::cout << "A " << table_vertices[starting_index].x << " "
+                                  << table_vertices[starting_index].y << " "
+                                  << table_vertices[starting_index].z << " " << std::endl;
+
+                        if (starting_index == -1)
+                            std::cerr << "Error: Unable to find starting vertex." << std::endl;
+                        else
+                        {
+                            // Step 2: Compute the centroid of all vertices
+                            double x_centroid = 0.0;
+                            double y_centroid = 0.0;
+                            for (const auto &point_xyz : table_vertices)
+                            {
+                                x_centroid += point_xyz.x;
+                                y_centroid += point_xyz.y;
+                            }
+                            x_centroid /= table_vertices.size();
+                            y_centroid /= table_vertices.size();
+
+                            // Step 3: Compute angles and create a vector of VertexAngle
+                            std::vector<std::pair<int, double>> vertex_angles;
+                            vertex_angles.reserve(table_vertices.size());
+
+                            // Reference angle using starting vertex
+                            double dx_start = table_vertices[starting_index].x - x_centroid;
+                            double dy_start = table_vertices[starting_index].y - y_centroid;
+                            double angle_start = std::atan2(dy_start, dx_start); // Reference angle
+
+                            for (int i = 0; i < table_vertices.size(); ++i)
+                            {
+                                double dx = table_vertices[i].x - x_centroid;
+                                double dy = table_vertices[i].y - y_centroid;
+                                double angle = std::atan2(dy, dx); // Angle relative to centroid
+                                double adjusted_angle = angle - angle_start;
+                                // Normalize the adjusted angle to [0, 2*pi)
+                                if (adjusted_angle < 0)
+                                    adjusted_angle += 2 * M_PI;
+                                vertex_angles.push_back(make_pair(i, adjusted_angle));
+                            }
+
+                            // Step 4: Sort the vector based on angle in ascending order
+                            std::sort(vertex_angles.begin(), vertex_angles.end(),
+                                      [](const std::pair<int, double> &a, const std::pair<int, double> &b) -> bool
+                                      {
+                                          return a.second < b.second;
+                                      });
+
+                            // Step 5: Create a sorted PoseArray based on sorted indices
+                            std::vector<geometry_msgs::msg::Point> sorted_points;
+                            sorted_points.reserve(table_vertices.size());
+
+                            for (const auto &va : vertex_angles)
+                            {
+                                sorted_points.push_back(table_vertices[va.first]);
+                            }
+                            table_vertices = sorted_points;
+                        }
+                    }
+                };
+                sortTableVerticesAntiClockwise();
+                geometry_msgs::msg::Polygon table_msg;
+                geometry_msgs::msg::Point32 xyz_32;
+                for (const auto &v : table_vertices)
+                {
+                    xyz_32.x = v.x;
+                    xyz_32.y = v.y;
+                    xyz_32.z = v.z;
+                    table_msg.points.push_back(xyz_32);
+                }
+                table_vertices_pub->publish(table_msg);
             }
         }
         else

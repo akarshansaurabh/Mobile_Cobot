@@ -35,6 +35,7 @@
 #include <Eigen/Dense>
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <geometry_msgs/msg/pose_array.hpp>
+#include <geometry_msgs/msg/polygon.hpp>
 
 #include "visualizations/visualization_manager.hpp"
 
@@ -97,6 +98,7 @@ namespace pointcloud_processing
         rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pointcloud_pub_;
         rclcpp::Publisher<geometry_msgs::msg::Vector3>::SharedPtr move_amr_pub_;
         rclcpp::Publisher<geometry_msgs::msg::PoseArray>::SharedPtr box_poses_pub;
+        rclcpp::Publisher<geometry_msgs::msg::Polygon>::SharedPtr table_vertices_pub;
         rclcpp::Publisher<custom_interfaces::msg::TableVertices>::SharedPtr table_vertices_pub_;
         rclcpp::Service<custom_interfaces::srv::BoxposeEstimator>::SharedPtr box6dposes_server_;
 

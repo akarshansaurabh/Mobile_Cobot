@@ -508,6 +508,13 @@ namespace custom_nav2_action_client2
             current_pose.pose.position.y = transform_stamped.transform.translation.y;
             current_pose.pose.position.z = transform_stamped.transform.translation.z;
             current_pose.pose.orientation = transform_stamped.transform.rotation;
+            std::cout << "check " << current_pose.pose.position.x << " "
+                      << current_pose.pose.position.y << " "
+                      << current_pose.pose.position.z << " "
+                      << current_pose.pose.orientation.x << " "
+                      << current_pose.pose.orientation.y << " "
+                      << current_pose.pose.orientation.z << " "
+                      << current_pose.pose.orientation.w << std::endl;
         }
         catch (tf2::TransformException &ex)
         {

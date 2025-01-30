@@ -38,7 +38,7 @@ namespace collision_free_planning
         // Compute Grasp and Pre Grasp Pose in Base
         Eigen::Matrix4d Tmapbase = Conversions::TransformStamped_2Eigen(map_to_base_transform_);
         Eigen::Matrix4d Tmapbox = Conversions::Pose_2Eigen(box_top_face_pose);
-        Tmapbox(2, 3) += 0.025;
+        Tmapbox(2, 3) += 0.02;
         Eigen::Matrix4d Tbasebox_grasp_pose = Tmapbase.inverse() * Tmapbox;
         Eigen::Vector3d z_cap = -Tbasebox_grasp_pose.block<3, 1>(0, 2);
         Eigen::Vector3d y_cap = Tbasebox_grasp_pose.block<3, 1>(0, 1);

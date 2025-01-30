@@ -14,6 +14,7 @@
 
 #include <geometry_msgs/msg/transform_stamped.hpp>
 #include <geometry_msgs/msg/pose.hpp>
+#include <geometry_msgs/msg/quaternion.hpp>
 
 using namespace std;
 
@@ -100,6 +101,17 @@ namespace Conversions
         mat(2, 1) = static_cast<float>(kdl_frame.M(2, 1));
         mat(2, 2) = static_cast<float>(kdl_frame.M(2, 2));
         return mat;
+    }
+
+    inline geometry_msgs::msg::Quaternion EigenM_2ROSQuat(const Eigen::Matrix3d &R)
+    {
+        Eigen::Quaterniond q(R);
+        geometry_msgs::msg::Quaternion q_msg;
+        q_msg.x = q.x();
+        q_msg.y = q.y();
+        q_msg.z = q.z();
+        q_msg.w = q.w();
+        return q_msg;
     }
 }
 
