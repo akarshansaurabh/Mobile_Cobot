@@ -172,7 +172,7 @@ namespace pointcloud_processing
         std::vector<pcl::PointIndices> cluster_indices;
         min_cluster_size_ = 5;
         max_cluster_size_ = 1000;
-        cluster_tolerance_ = 0.02;
+        cluster_tolerance_ = 0.01;
         extractClusters(pcl_cloud, cluster_indices);
         min_cluster_size_ = 50;
         max_cluster_size_ = 1000;
@@ -192,7 +192,7 @@ namespace pointcloud_processing
             geometry_msgs::msg::Pose box_pose;
             pcl::PointCloud<pcl::PointXYZRGB>::Ptr local_top_faces(new pcl::PointCloud<pcl::PointXYZRGB>());
 
-            bool found = ComputeBox6DPose(indices, pcl_cloud, local_top_faces, box_pose);
+            bool found = ComputeBox4DPose(indices, pcl_cloud, local_top_faces, box_pose);
             return std::make_tuple(found, box_pose, local_top_faces); }));
         }
         for (auto &fut : futures)
@@ -356,14 +356,27 @@ namespace pointcloud_processing
         ec.setSearchMethod(tree);
         ec.setInputCloud(cloud);
         ec.extract(cluster_indices);
-        for (const auto &cluster : cluster_indices)
-            std::cout << "cluster points " << cluster.indices.size() << std::endl;
-        std::cout << "___________________________________" << std::endl;
+        cout << "number of eclidean cluster = " << cluster_indices.size();
+        // for (const auto &cluster : cluster_indices)
+        //     std::cout << "cluster points " << cluster.indices.size() << std::endl;
+        // std::cout << "___________________________________" << std::endl;
+        if (cluster_indices.size() == 0)
+        {
+            // DBSCAN Clustering
+            pcl::DBSCAN<pcl::PointXYZRGB> dbscan;
+            dbscan.setEps(0.02); // Radius to look for neighbors in, adjust this
+            dbscan.setMinPts(5); // Minimum number of neighbors to be a core point, adjust this
+            dbscan.setSearchMethod(tree);
+            dbscan.setInputCloud(cloud);
+            dbscan.extract(cluster_indices);
+            cout << "number of DBSCAN cluster = " << cluster_indices.size();
+        }
     }
 
     void PointCloudProcessor::pointCloudTableDetectionCallback(const sensor_msgs::msg::PointCloud2::ConstSharedPtr &msg)
     {
         table_detection_counter_++;
+        cout << "table_detection_counter_ " << table_detection_counter_ << endl;
 
         // Convert ROS PointCloud2 message to PCL PointCloud
         auto pcl_cloud = std::make_shared<pcl::PointCloud<pcl::PointXYZRGB>>();
@@ -504,8 +517,12 @@ namespace pointcloud_processing
         }
         else
         {
-            std::this_thread::sleep_for(std::chrono::milliseconds(7000));
-            ResendTableAsDestination();
+            cout << "table could not be deteted" << endl;
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+            if (table_detection_counter_ == 3)
+                table_detection_sub_.reset();
+            if (table_detection_counter_ < 3)
+                ResendTableAsDestination();
         }
 
         // Reset the subscriber after processing
@@ -661,7 +678,7 @@ namespace pointcloud_processing
         return true;
     }
 
-    bool PointCloudProcessor::ComputeBox6DPose(const pcl::PointIndices &cluster_indices, const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud,
+    bool PointCloudProcessor::ComputeBox4DPose(const pcl::PointIndices &cluster_indices, const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud,
                                                pcl::PointCloud<pcl::PointXYZRGB>::Ptr &top_faces_cloud, geometry_msgs::msg::Pose &box_pose)
     {
         // Extract the cluster point cloud from the input cloud using the provided indices
@@ -781,5 +798,162 @@ namespace pointcloud_processing
             num_planes_extracted++;
         }
         return false;
+    }
+
+    bool PointCloudProcessor::ComputeBox6DPose(const pcl::PointIndices &cluster_indices, const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud,
+                                               pcl::PointCloud<pcl::PointXYZRGB>::Ptr &top_faces_cloud, geometry_msgs::msg::Pose &box_pose)
+    {
+        // Extract cluster point cloud
+        pcl::PointCloud<pcl::PointXYZRGB>::Ptr cluster_cloud(new pcl::PointCloud<pcl::PointXYZRGB>());
+        pcl::ExtractIndices<pcl::PointXYZRGB> extract_cluster;
+        pcl::PointIndices::Ptr cluster_indices_ptr(new pcl::PointIndices(cluster_indices));
+        extract_cluster.setInputCloud(cloud);
+        extract_cluster.setIndices(cluster_indices_ptr);
+        extract_cluster.setNegative(false);
+        extract_cluster.filter(*cluster_cloud);
+
+        if (cluster_cloud->empty())
+        {
+            RCLCPP_ERROR(this->get_logger(), "Input cluster cloud is empty.");
+            return false;
+        }
+
+        // Plane segmentation setup
+        pcl::SACSegmentation<pcl::PointXYZRGB> seg;
+        pcl::ExtractIndices<pcl::PointXYZRGB> extract_plane;
+        seg.setOptimizeCoefficients(true);
+        seg.setModelType(pcl::SACMODEL_PLANE);
+        seg.setMethodType(pcl::SAC_RANSAC);
+        seg.setDistanceThreshold(plane_distance_threshold_); // Use member variable
+
+        std::vector<pcl::ModelCoefficients::Ptr> plane_coefficients;
+        std::vector<pcl::PointIndices::Ptr> plane_inliers;
+        pcl::PointCloud<pcl::PointXYZRGB>::Ptr remaining_cloud(new pcl::PointCloud<pcl::PointXYZRGB>(*cluster_cloud));
+
+        int num_planes_extracted = 0;
+        while (num_planes_extracted < 3)
+        {
+            pcl::ModelCoefficients::Ptr coefficients(new pcl::ModelCoefficients);
+            pcl::PointIndices::Ptr inliers(new pcl::PointIndices);
+            seg.setInputCloud(remaining_cloud);
+            seg.segment(*inliers, *coefficients);
+
+            if (inliers->indices.size() == 0)
+            {
+                RCLCPP_INFO(this->get_logger(), "RANSAC could not find more planes or no more points left.");
+                break; // No more planes found
+            }
+
+            plane_coefficients.push_back(coefficients);
+            plane_inliers.push_back(inliers);
+
+            // Extract plane points and remove from remaining cloud for next iteration
+            pcl::PointCloud<pcl::PointXYZRGB>::Ptr extracted_plane_cloud(new pcl::PointCloud<pcl::PointXYZRGB>());
+            extract_plane.setInputCloud(remaining_cloud);
+            extract_plane.setIndices(inliers);
+            extract_plane.setNegative(false);
+            extract_plane.filter(*extracted_plane_cloud);
+
+            extract_plane.setInputCloud(remaining_cloud);
+            extract_plane.setIndices(inliers);
+            extract_plane.setNegative(true);
+            extract_plane.filter(*remaining_cloud);
+
+            num_planes_extracted++;
+        }
+
+        if (plane_coefficients.size() < 3)
+        {
+            RCLCPP_ERROR(this->get_logger(), "Found less than 3 planes, cannot compute 6D pose reliably.");
+            return false;
+        }
+
+        std::vector<Eigen::Vector3f> plane_normals;
+        std::vector<pcl::PointCloud<pcl::PointXYZRGB>::Ptr> plane_point_clouds;
+        std::vector<Eigen::Vector4f> plane_centroids;
+        std::vector<double> avg_z_values;
+
+        for (size_t i = 0; i < plane_coefficients.size(); ++i)
+        {
+            Eigen::Vector3f normal(plane_coefficients[i]->values[0], plane_coefficients[i]->values[1], plane_coefficients[i]->values[2]);
+            normal.normalize();
+            plane_normals.push_back(normal);
+
+            pcl::PointCloud<pcl::PointXYZRGB>::Ptr current_plane_cloud(new pcl::PointCloud<pcl::PointXYZRGB>());
+            extract_plane.setInputCloud(cluster_cloud); // Use original cluster cloud, and filter by inliers of each plane
+            extract_plane.setIndices(plane_inliers[i]);
+            extract_plane.setNegative(false);
+            extract_plane.filter(*current_plane_cloud);
+            plane_point_clouds.push_back(current_plane_cloud);
+
+            Eigen::Vector4f centroid;
+            pcl::compute3DCentroid(*current_plane_cloud, centroid);
+            plane_centroids.push_back(centroid);
+
+            double sum_z = 0.0;
+            for (const auto &point : current_plane_cloud->points)
+                sum_z += point.z;
+            double avg_z = sum_z / current_plane_cloud->points.size();
+            avg_z_values.push_back(avg_z);
+        }
+
+        // Identify top face (plane with max avg_z)
+        int top_face_index = 0;
+        double max_avg_z = -std::numeric_limits<double>::infinity();
+        for (size_t i = 0; i < avg_z_values.size(); ++i)
+        {
+            if (avg_z_values[i] > max_avg_z)
+            {
+                max_avg_z = avg_z_values[i];
+                top_face_index = i;
+            }
+        }
+
+        Eigen::Vector3f n_top = plane_normals[top_face_index];
+        pcl::PointCloud<pcl::PointXYZRGB>::Ptr P_top = plane_point_clouds[top_face_index];
+        Eigen::Vector4f centroid_top_face = plane_centroids[top_face_index];
+
+        int plane2_index = -1, plane3_index = -1;
+        int current_index = 0;
+        for (size_t i = 0; i < plane_normals.size(); ++i)
+        {
+            if (i != top_face_index)
+            {
+                if (plane2_index == -1)
+                    plane2_index = i;
+                else if (plane3_index == -1)
+                    plane3_index = i;
+                current_index++;
+            }
+        }
+
+        Eigen::Vector3f n2_ = plane_normals[plane2_index];
+        Eigen::Vector3f n3_ = plane_normals[plane3_index];
+
+        Eigen::Vector3f x_cap = n_top.cross(n2_);
+        x_cap.normalize();
+        Eigen::Vector3f y_cap = n_top.cross(n3_);
+        y_cap.normalize();
+        Eigen::Vector3f z_cap = x_cap.cross(y_cap);
+        z_cap.normalize();
+
+        Eigen::Matrix3f rotation;
+        rotation.col(0) = x_cap;
+        rotation.col(1) = y_cap;
+        rotation.col(2) = z_cap;
+
+        Eigen::Quaternionf quat(rotation);
+
+        // Fill box_pose
+        box_pose.position.x = centroid_top_face[0];
+        box_pose.position.y = centroid_top_face[1];
+        box_pose.position.z = centroid_top_face[2];
+        box_pose.orientation.x = quat.x();
+        box_pose.orientation.y = quat.y();
+        box_pose.orientation.z = quat.z();
+        box_pose.orientation.w = quat.w();
+
+        *top_faces_cloud = *P_top; // Output top face cloud
+        return true;
     }
 }

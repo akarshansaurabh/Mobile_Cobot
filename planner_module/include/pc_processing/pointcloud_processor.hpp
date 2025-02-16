@@ -21,6 +21,7 @@
 
 #include <pcl/segmentation/sac_segmentation.h>
 #include <pcl/segmentation/extract_clusters.h>
+// #include <pcl/segmentation/dbscan.h>
 
 #include <pcl/features/moment_of_inertia_estimation.h>
 
@@ -86,6 +87,8 @@ namespace pointcloud_processing
                                   const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud,
                                   geometry_msgs::msg::Pose &box_pose);
         bool tableIsPresent(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud, std::vector<geometry_msgs::msg::Point> &vertices, const rclcpp::Time &timestamp);
+        bool ComputeBox4DPose(const pcl::PointIndices &cluster_indices, const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud,
+                              pcl::PointCloud<pcl::PointXYZRGB>::Ptr &top_faces_cloud, geometry_msgs::msg::Pose &box_pose);
         bool ComputeBox6DPose(const pcl::PointIndices &cluster_indices, const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud,
                               pcl::PointCloud<pcl::PointXYZRGB>::Ptr &top_faces_cloud, geometry_msgs::msg::Pose &box_pose);
 
