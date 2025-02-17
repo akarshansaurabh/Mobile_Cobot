@@ -18,11 +18,11 @@ namespace manager
 
         goal_completion_sub_ = node_->create_subscription<std_msgs::msg::Bool>(
             "/manager_nav2_topic", rclcpp::QoS(10),
-            std::bind(&Manager::GoalCompletionCallBack, this, std::placeholders::_1));
+            std::bind(&Manager::MobileBaseGoalCompletionCallBack, this, std::placeholders::_1));
 
         arm_goal_completion_sub_ = node_->create_subscription<std_msgs::msg::Bool>(
             "/arm_goal_completion_topic", rclcpp::QoS(10),
-            std::bind(&Manager::ArmGoalCompletionCallBack, this, std::placeholders::_1));
+            std::bind(&Manager::RoboticArmGoalCompletionCallBack, this, std::placeholders::_1));
 
         table_vertices_sub_ = node_->create_subscription<geometry_msgs::msg::Polygon>(
             "/table_vertices_topic", rclcpp::QoS(10),
@@ -30,6 +30,7 @@ namespace manager
 
         arm_goal_by_manager_pub_ = node_->create_publisher<geometry_msgs::msg::Pose>("/arm_goal_by_manager_topic", 10);
         clear_octamap_pub_ = node_->create_publisher<std_msgs::msg::Bool>("/clear_octamap_topic", 10);
+        octomap_pub_ = node_->create_publisher<sensor_msgs::msg::PointCloud2>("/octomap_topic_", rclcpp::QoS(10));
 
         goal_index_tracker_.current_amr_pose_index = 0;
         goal_index_tracker_.current_arm_pose_index = 0;
@@ -44,7 +45,7 @@ namespace manager
     }
 
     // after nth arm goal completion, goal_index_tracker_.current_arm_pose_index = n
-    void Manager::ArmGoalCompletionCallBack(const std_msgs::msg::Bool::ConstSharedPtr &msg)
+    void Manager::RoboticArmGoalCompletionCallBack(const std_msgs::msg::Bool::ConstSharedPtr &msg)
     {
         if (!all_waypoints.empty())
             all_waypoints.erase(all_waypoints.begin());
@@ -63,11 +64,27 @@ namespace manager
             std_msgs::msg::Bool msg;
             msg.data = true;
             clear_octamap_pub_->publish(msg);
+            box_poses_.poses.clear();
+
+            sensor_msgs::msg::PointCloud2 empty_cloud;
+
+            empty_cloud.header.stamp = node_->get_clock()->now();
+            empty_cloud.header.frame_id = "map";
+            empty_cloud.height = 1;
+            empty_cloud.width = 0;
+            empty_cloud.fields.clear();
+            empty_cloud.data.clear();
+            empty_cloud.is_dense = true;
+            empty_cloud.is_bigendian = false;
+            empty_cloud.point_step = 0;
+            empty_cloud.row_step = 0;
+
+            octomap_pub_->publish(empty_cloud);
         }
         std::cout << "size after removing " << all_waypoints.size() << std::endl;
     }
 
-    void Manager::GoalCompletionCallBack(const std_msgs::msg::Bool::ConstSharedPtr &box_poses_msg)
+    void Manager::MobileBaseGoalCompletionCallBack(const std_msgs::msg::Bool::ConstSharedPtr &box_poses_msg)
     {
         // if (goal_index_tracker_.current_amr_pose_index % 3 == 0)
         if (goal_index_tracker_.current_amr_pose_index > 0 &&

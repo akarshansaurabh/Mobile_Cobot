@@ -48,10 +48,48 @@ namespace arm_planner
         arm_goal_by_manager_sub_ = node_->create_subscription<geometry_msgs::msg::Pose>(
             "/arm_goal_by_manager_topic", rclcpp::QoS(10),
             std::bind(&ArmController::ManagerCallback, this, std::placeholders::_1));
+        img_processing_param_client_ = std::make_shared<rclcpp::AsyncParametersClient>(node_, "/image_processing_node");
 
         colision_free_planner_client = node_->create_client<custom_interfaces::srv::GoalPoseVector>("colision_free_planner_service");
         ask_manager_to_process = false;
         current_ompl_index = 0;
+    }
+
+    void ArmController::SetImgProcessingParameter(bool val)
+    {
+        if (!img_processing_param_client_->wait_for_service(10s))
+        {
+            RCLCPP_ERROR(node_->get_logger(), "Img Processing parameter service not available.");
+            return;
+        }
+
+        std::vector<rclcpp::Parameter> params = {rclcpp::Parameter("activate_detection", val)};
+        auto future = img_processing_param_client_->set_parameters(params);
+
+        std::thread([this, future = std::move(future), params]() mutable
+                    {
+        try
+        {
+            auto results = future.get();
+            for (size_t i = 0; i < results.size(); ++i)
+            {
+                if (!results[i].successful)
+                {
+                    RCLCPP_ERROR(node_->get_logger(), "Failed to set parameter '%s': %s",
+                                 params[i].get_name().c_str(), results[i].reason.c_str());
+                }
+                else
+                {
+                    RCLCPP_INFO(node_->get_logger(), "Successfully set parameter '%s'",
+                                params[i].get_name().c_str());
+                }
+            }
+        }
+        catch (const std::exception &e)
+        {
+            RCLCPP_ERROR(node_->get_logger(), "Exception while setting parameters: %s", e.what());
+        } })
+            .detach();
     }
 
     void ArmController::ManagerCallback(const geometry_msgs::msg::Pose::ConstSharedPtr &msg)
@@ -82,13 +120,6 @@ namespace arm_planner
             if (result->joint_states_vector.size() >= 4)
             {
                 num_of_ompl_waypoints = result->joint_states_vector.size();
-                std::cout << "num_of_ompl_waypoints = " << num_of_ompl_waypoints << std::endl;
-                std::cout << "num_of_ompl_waypoints = " << num_of_ompl_waypoints << std::endl;
-                std::cout << "num_of_ompl_waypoints = " << num_of_ompl_waypoints << std::endl;
-                std::cout << "num_of_ompl_waypoints = " << num_of_ompl_waypoints << std::endl;
-                std::cout << "num_of_ompl_waypoints = " << num_of_ompl_waypoints << std::endl;
-                std::cout << "num_of_ompl_waypoints = " << num_of_ompl_waypoints << std::endl;
-                std::cout << "num_of_ompl_waypoints = " << num_of_ompl_waypoints << std::endl;
                 joint_states_vector_.resize(result->joint_states_vector.size());
                 for (int i = 0; i < result->joint_states_vector.size(); i++)
                 {
@@ -306,26 +337,20 @@ namespace arm_planner
             }
             else if (arm_goal_pose_name_ == "c2")
             {
+                SetImgProcessingParameter(true);
                 triggerSnapshotForCurrentViewpoint(false);
                 proceedToNextViewpoint("c3");
                 // previous_c3_ = false;
             }
             else if (arm_goal_pose_name_ == "c3")
             {
+                SetImgProcessingParameter(false);
                 triggerSnapshotForCurrentViewpoint(true);
                 proceedToNextViewpoint("nav_pose");
                 // previous_c3_ = true;
             }
             else if (arm_goal_pose_name_ == "nav_pose")
             {
-                // if (ask_manager_to_process)
-                // {
-                //     std_msgs::msg::Bool msg;
-                //     msg.data = true;
-                //     current_ompl_index = 0;
-                //     goal_completion_pub_->publish(msg);
-                //     ask_manager_to_process = false;
-                // }
             }
             else if (arm_goal_pose_name_ == "ompl_1")
             {

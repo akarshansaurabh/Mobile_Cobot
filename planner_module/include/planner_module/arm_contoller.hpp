@@ -64,7 +64,9 @@ namespace arm_planner
         geometry_msgs::msg::PoseArray box_6d_poses_;
 
         rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr goal_completion_pub_;
+        rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr octomap_pub_;
         rclcpp::Subscription<geometry_msgs::msg::Pose>::SharedPtr arm_goal_by_manager_sub_;
+        rclcpp::AsyncParametersClient::SharedPtr img_processing_param_client_;
 
         void ManagerCallback(const geometry_msgs::msg::Pose::ConstSharedPtr &msg);
         rclcpp::Client<custom_interfaces::srv::GoalPoseVector>::SharedPtr colision_free_planner_client;
@@ -72,10 +74,10 @@ namespace arm_planner
         void HandleResponse(rclcpp::Client<custom_interfaces::srv::GoalPoseVector>::SharedFuture future);
 
         rclcpp_action::Client<FollowJointTrajectory>::SharedPtr joint_trajectory_action_client_;
-        rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr octomap_pub_;
 
         void proceedToNextViewpoint(std::string str);
         void triggerSnapshotForCurrentViewpoint(bool stitch);
+        void SetImgProcessingParameter(bool val);
 
         // Methods
         void SendJointTrajectoryGoal(const trajectory_msgs::msg::JointTrajectory &trajectory);

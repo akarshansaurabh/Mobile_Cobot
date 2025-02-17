@@ -2,6 +2,7 @@
 import cv2
 import numpy as np
 import os
+import math
 import random
 from abc import ABC, abstractmethod
 from itertools import permutations
@@ -12,7 +13,7 @@ from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSDurabilityPolicy, QoS
 from sensor_msgs.msg import Image
 from cv_bridge import CvBridge, CvBridgeError
 import threading  # Import the threading module
-from queue import Queue  # Import Queue for thread communication
+from queue import Queue, Empty  # Import Queue for thread communication
 from rcl_interfaces.msg import ParameterDescriptor, SetParametersResult
 
 
@@ -48,7 +49,7 @@ class Point:
     def to_numpy(self):
         return np.array([self.x, self.y])
 
-class RectangleChecker:
+class TwoDShapeExtractor:
     """Checks if a contour is a rectangle, square, or parallelogram."""
 
     def __init__(self, angle_tolerance=10.0, side_angle_tolerance_parallelogram=20.0):
@@ -90,7 +91,7 @@ class RectangleChecker:
             return False
         return True
 
-    def check_contour(self, contour):
+    def is_box(self, contour):
         """Checks if a contour is a rectangle/square/parallelogram."""
         approx = cv2.approxPolyDP(contour, 0.014 * cv2.arcLength(contour, True), True)
         if len(approx) != 4:
@@ -98,6 +99,38 @@ class RectangleChecker:
 
         ordered_rect_points = VertexOrderer.order_vertices_centroid_angle(contour)
         return self.is_rectangle_or_square(ordered_rect_points) or self.is_parallelogram(ordered_rect_points)
+
+    def detect_ellipse(self, contour):
+
+        if len(contour) >= 5:  # fitEllipse requires at least 5 points
+            ellipse = cv2.fitEllipse(contour)
+            return ellipse
+        else:
+            return None   
+
+    def is_circle_ellipse(self, updated_contour):
+
+        ellipse = self.detect_ellipse(updated_contour)
+        if ellipse:
+            (x,y), (MA, ma), angle = ellipse
+            a = MA/2.0
+            b = ma/2.0
+            area_ellipse = np.pi*a*b
+            area_contour = cv2.contourArea(updated_contour)
+            area_ratio = area_ellipse / area_contour if area_contour != 0 else 0 
+
+            if area_contour >= 150.0:
+                if 0.9 <= area_ratio <= 1.111:
+                    if 0.9 <= a/b <= 1.111:
+                        print("valid circle found")
+                    else:
+                        print("valid ellipse found")
+                    return True, updated_contour
+            else:
+                print("background noise")
+        return False, updated_contour
+            
+
 
 class VertexOrderer:
     """Orders vertices of a contour based on centroid angle."""
@@ -147,11 +180,11 @@ class VertexOrderer:
 class ContourFilter:
     """Filters contours based on various criteria."""
 
-    def __init__(self, min_area=300.0, max_area=25000.0, min_edges=4, rect_check: RectangleChecker = None):
+    def __init__(self, min_area=300.0, max_area=25000.0, min_edges=4, shape_extractor: TwoDShapeExtractor = None):
         self.min_area = min_area
         self.max_area = max_area
         self.min_edges = min_edges
-        self.rect_check = rect_check or RectangleChecker() # Use composition
+        self.shape_extractor = shape_extractor or TwoDShapeExtractor() # Use composition
         self.area_with_more_edges = 3000.0 # Initialize
 
     def filter_contours(self, contours, rows, cols):
@@ -167,10 +200,7 @@ class ContourFilter:
 
             is_box = True
             if num_edges_approx == 4:
-                is_box = self.rect_check.check_contour(contour)  # Use RectangleChecker
-
-            if num_edges_approx > 5:
-              self.area_with_more_edges = cv2.contourArea(contour)
+                is_box = self.shape_extractor.is_box(contour)  # Use TwoDShapeExtractor
 
             is_border_pixel_present = self._check_border_pixel(contour, rows, cols)
 
@@ -226,19 +256,17 @@ class ImageLoader:
     """Loads an image from a file."""
 
     def __init__(self, image_path, ros_image):
-        rows, cols = ros_image.shape
-        if np.sum(ros_image == 0) == rows * cols:
-            self.image_path = image_path
-        else:
-            self.image_path = ""
+        rows, cols = ros_image.shape[:2]
+        self.image_path = image_path
 
     def load_image(self, ros_image):
         """Loads the image and returns it.  Returns None on error."""
-        rows, cols = ros_image.shape
-        if np.sum(image_path == 0) == rows * cols:
-            image = ros_image
-        else:
+        rows, cols = ros_image.shape[:2]
+        # if the img is blank, image is not sent by the camera -> read img from path
+        if np.sum(ros_image == 0) == rows * cols:  # blank image
             image = cv2.imread(self.image_path)
+        else:
+            image = ros_image
         if image is None:
             print(f"Error: Could not load image from {self.image_path}")
         return image
@@ -520,43 +548,49 @@ class ClusterAnalyzer:
         mask_bgr = cv2.cvtColor(modified_mask, cv2.COLOR_GRAY2BGR)
 
         for contour in contours:
-            color = tuple(np.random.randint(0, 255, 3).tolist())
-            cv2.drawContours(mask_bgr, [contour], -1, (255,255,255), thickness=cv2.FILLED)
+            shape_extractor = TwoDShapeExtractor()
+            flag, cont = shape_extractor.is_circle_ellipse(contour)
+            if flag:
+                print("circle/ellipse detected, will not be visualised")
+                cv2.drawContours(mask_bgr, [contour], -1, (0,0,0), thickness=cv2.FILLED)
+            else:
+                color = tuple(np.random.randint(0, 255, 3).tolist())
+                cv2.drawContours(mask_bgr, [contour], -1, (255,255,255), thickness=cv2.FILLED)
 
-            # Find approxPolyDP and centroid
-            epsilon = 0.04 * cv2.arcLength(contour, True)
-            approx = cv2.approxPolyDP(contour, epsilon, True)
+                # Find approxPolyDP and centroid
+                epsilon = 0.04 * cv2.arcLength(contour, True)
+                approx = cv2.approxPolyDP(contour, epsilon, True)
 
-            M = cv2.moments(approx)
-            if M["m00"] != 0:
-                cX = int(M["m10"] / M["m00"])
-                cY = int(M["m01"] / M["m00"])
-                centroid = (cX, cY)
+                M = cv2.moments(approx)
+                if M["m00"] != 0:
+                    cX = int(M["m10"] / M["m00"])
+                    cY = int(M["m01"] / M["m00"])
+                    centroid = (cX, cY)
 
-                # --- Draw Centroid ---
-                cv2.circle(mask_bgr, centroid, 3, (0, 0, 0), -1)  # Black circle
+                    # --- Draw Centroid ---
+                    cv2.circle(mask_bgr, centroid, 3, (0, 0, 0), -1)  # Black circle
 
-                # --- Vector Calculation and Drawing ---
-                p1 = tuple(approx[0 % len(approx)][0])
-                p2 = tuple(approx[1 % len(approx)][0])  
-                p3 = tuple(approx[2 % len(approx)][0])  
+                    # --- Vector Calculation and Drawing ---
+                    p1 = tuple(approx[0 % len(approx)][0])
+                    p2 = tuple(approx[1 % len(approx)][0])  
+                    p3 = tuple(approx[2 % len(approx)][0])  
 
 
-                v1 = np.array(p1) - np.array(p2)
-                v2 = np.array(p3) - np.array(p2)
-                norm_v1 = np.linalg.norm(v1)
-                unit_v1 = v1 / norm_v1 if norm_v1 !=0 else np.array([0,0])
-                    
-                norm_v2 = np.linalg.norm(v2)
-                unit_v2 = v2/ norm_v2 if norm_v2 != 0 else np.array([0,0])
+                    v1 = np.array(p1) - np.array(p2)
+                    v2 = np.array(p3) - np.array(p2)
+                    norm_v1 = np.linalg.norm(v1)
+                    unit_v1 = v1 / norm_v1 if norm_v1 !=0 else np.array([0,0])
+                        
+                    norm_v2 = np.linalg.norm(v2)
+                    unit_v2 = v2/ norm_v2 if norm_v2 != 0 else np.array([0,0])
 
-                scale = 40
-                scaled_v1 = (centroid[0] + int(unit_v1[0] * scale), centroid[1] + int(unit_v1[1] * scale))
-                scaled_v2 = (centroid[0] + int(unit_v2[0] * scale), centroid[1] + int(unit_v2[1] * scale))
+                    scale = 40
+                    scaled_v1 = (centroid[0] + int(unit_v1[0] * scale), centroid[1] + int(unit_v1[1] * scale))
+                    scaled_v2 = (centroid[0] + int(unit_v2[0] * scale), centroid[1] + int(unit_v2[1] * scale))
 
-                # Draw vectors
-                cv2.arrowedLine(mask_bgr, centroid, scaled_v1, (0, 180, 0), 2)  # White vectors
-                cv2.arrowedLine(mask_bgr, centroid, scaled_v2, (0, 0, 255), 2)
+                    # Draw vectors
+                    cv2.arrowedLine(mask_bgr, centroid, scaled_v1, (0, 180, 0), 2)  # White vectors
+                    cv2.arrowedLine(mask_bgr, centroid, scaled_v2, (0, 0, 255), 2)
 
         mask_path = os.path.join(self.output_dir, f"{self.base_filename}_{self.color_space_name}_modified.png")
         cv2.imwrite(mask_path, mask_bgr)
@@ -591,9 +625,7 @@ class HSVClusterer(BaseImageClusterer):
         image = self.load_and_preprocess()
         if image is None:
             return  # Exit if image loading failed
-
         pixel_belongs_to_which_cluster, segmented_image, centers = self.kmeans_clustering(image)
-
         # Now, use the ClusterAnalyzer:
         base_filename = os.path.splitext(os.path.basename(self.image_loader.image_path))[0]
         analyzer = ClusterAnalyzer(image.shape, base_filename, self.output_dir, self.__class__.__name__, self.grid_size, self.K)
@@ -626,77 +658,82 @@ class ImageProcessing(Node):
     def __init__(self):
         super().__init__('image_processing_node')
         self.bridge = CvBridge()
-        self.publisher_ = None  # Initialize publisher to None
-        self.sub = None  # Initialize subscriber to None
-
+        self.processed_img_pub_ = None  # Initialize publisher to None
+        self.incoming_img_sub_ = None  # Initialize subscriber to None
+        self._stop_processing = False 
+        self.image_received = False
         # Quality of Service settings.  BEST_EFFORT is crucial for real-time performance.
         self.qos = QoSProfile(
-            reliability=QoSReliabilityPolicy.BEST_EFFORT,
+            reliability=QoSReliabilityPolicy.RELIABLE,
             durability=QoSDurabilityPolicy.VOLATILE,
             history=QoSHistoryPolicy.KEEP_LAST,
             depth=1  # Keep only the latest message.  Important for real-time!
         )
-        # self.K = 15  # K moved inside
-
         # Declare and get the 'activate_detection' parameter.
         self.declare_parameter('activate_detection', False, ParameterDescriptor(
             description='Enable or disable image processing.'))
         self.activate_detection = self.get_parameter(
             'activate_detection').get_parameter_value().bool_value
-
         # Set up a parameter callback to handle changes to 'activate_detection'
         self.add_on_set_parameters_callback(self.parameter_callback)
-
         # --- Threading Setup ---
-        self.image_queue = Queue(maxsize=2)  # Queue to hold incoming images.  Small size!
-        self.result_queue = Queue(maxsize=2)  # Queue to hold processed images
+        self.image_queue = Queue(maxsize=1)  # Queue to hold incoming images.  1 size!
+        self.result_queue = Queue(maxsize=1)  # Queue to hold processed images
         self.processing_thread = None
         self.lock = threading.Lock()  # Lock for thread safety
-        self.output_dir = "/home/akarshan/cv_learn/clustering_output"
+        self.output_dir = "/home/akarshan/mobile_cobot_ws/src/detection/img_processing_output"
         os.makedirs(self.output_dir, exist_ok=True)  # ensure output directory exists
-        self.bridge = CvBridge()
-
         # Create publisher here, so is active from the moment the node starts up.
-        self.publisher_ = self.create_publisher(Image, '/detections_visualized', self.qos)
-
+        self.processed_img_pub_ = self.create_publisher(Image, '/detections_visualized', self.qos)
         # if initial state of 'activate_detection is True
         if self.activate_detection is True:
             self.get_logger().info("Activating detection: creating subscription.")
-            self.sub = self.create_subscription(Image, '/arm_rgbd_camera/image_raw', self.image_callback, self.qos)
+            self.incoming_img_sub_ = self.create_subscription(Image, '/arm_rgbd_camera/image_raw', self.image_callback, self.qos)
+            self.start_processing_thread()
 
     def image_callback(self, msg):
         """Callback function for image subscription."""
-        if not self.image_queue.full():  # Avoid blocking if the queue is full
+        self.get_logger().info("Image Received")
+        if not self.image_received:  # Avoid blocking if the queue is full
+            self.image_received = True
             try:
-                # Convert ROS Image to OpenCV image
                 cv_image = self.bridge.imgmsg_to_cv2(msg, "bgr8")
-                self.image_queue.put(cv_image)  # Put the image into the queue
+                try:
+                    self.image_queue.put_nowait((cv_image, msg.header))
+                except queue.Full:  
+                    self.get_logger().info("Queue is Full")
+                # *Immediately* unsubscribe after receiving *one* image.
+                with self.lock:
+                    if self.incoming_img_sub_:
+                        self.get_logger().info("Destroying Image subscription after receiving one image.")
+                        self.destroy_subscription(self.incoming_img_sub_)
+                        self.incoming_img_sub_ = None
             except CvBridgeError as e:
                 self.get_logger().error(f"CvBridgeError: {e}")
 
     def processing_loop(self):
         """Thread function to process images from the queue."""
-        while rclpy.ok():  # Keep running as long as ROS 2 is running
+        while rclpy.ok() and not self._stop_processing:  # Keep running as long as ROS 2 is running
             try:
-                cv_image = self.image_queue.get(timeout=1.0)  # Get image from queue (with timeout)
-            except:
+                cv_image, header = self.image_queue.get(timeout=1.0)  # Get image from queue (with timeout)
+                print("cosumer gets the cv_image, header")
+            except Empty:
                 self.get_logger().info("Image Queue is Empty")
                 continue  # If queue is empty, go to the next iteration
+            except Exception as e:
+                self.get_logger().error("Error Retrieving Image from the Queue", e)
+                continue
             try:
-                # --- Image Processing (Call your existing logic here) ---
                 # *Critically*, pass a copy of the image, to avoid race condition
-
                 clusterer = HSVClusterer("", cv_image.copy(), K=15, use_blur=False,
-                                         output_dir=self.output_dir)  # Create a *new* clusterer each time
+                                         output_dir=self.output_dir)  
                 processed_image = clusterer.run()
-
-                # --- Publish Processed Image (if publisher exists)---
-                if self.publisher_:
+                
+                if self.processed_img_pub_:
                     try:
-                        # Convert processed image back to ROS Image
                         ros_image = self.bridge.cv2_to_imgmsg(processed_image, "bgr8")
-                        ros_image.header = msg.header  # Copy the header from the input image
-                        self.publisher_.publish(ros_image)
+                        ros_image.header = header  # Copy the header from the input image
+                        self.processed_img_pub_.publish(ros_image)
                     except CvBridgeError as e:
                         self.get_logger().error(f"CvBridgeError during publish: {e}")
             except Exception as e:
@@ -704,24 +741,32 @@ class ImageProcessing(Node):
 
             self.image_queue.task_done()  # Indicate that the task is done
 
+    def start_processing_thread(self):
+        """Starts the processing thread if it's not already running."""
+        if self.processing_thread is None or not self.processing_thread.is_alive():
+            self.get_logger().info("Starting processing thread.")
+            self._stop_processing = False  # Reset the flag
+            self.processing_thread = threading.Thread(target=self.processing_loop, daemon=True)
+            self.processing_thread.start()
+
     def parameter_callback(self, params):
         """Callback for parameter changes, particularly for 'activate_detection'."""
         for param in params:
             if param.name == 'activate_detection':
                 with self.lock:  # Use lock for thread safety
-                    if param.value is True and self.sub is None:
+                    if param.value is True and self.incoming_img_sub_ is None:
                         self.get_logger().info("Activating detection: creating subscription.")
-                        self.sub = self.create_subscription(Image, '/arm_rgbd_camera/image_raw', self.image_callback,
-                                                           self.qos)
-                        if self.processing_thread is None or not self.processing_thread.is_alive():
-                            self.get_logger().info("Starting processing thread.")
-                            self.processing_thread = threading.Thread(target=self.processing_loop, daemon=True)
-                            self.processing_thread.start()
-                    elif param.value is False and self.sub is not None:
+                        self.incoming_img_sub_ = self.create_subscription(Image, '/arm_rgbd_camera/image_raw', self.image_callback, self.qos)
+                        self.image_received = False
+                        self.start_processing_thread()
+                    elif param.value is False:
                         self.get_logger().info("Deactivating detection: destroying subscription.")
-                        self.destroy_subscription(self.sub)
-                        self.sub = None
-                        # No need to explicitly stop the thread, rclpy.ok() will handle
+                        if self.incoming_img_sub_:
+                            self.destroy_subscription(self.incoming_img_sub_)
+                            self.incoming_img_sub_ = None
+                        self._stop_processing = True
+                        self.processing_thread = None
+                        self.image_received = False
         # Accept all parameter changes
         return SetParametersResult(successful=True)
 
@@ -732,8 +777,6 @@ def main(args=None):
     rclpy.spin(image_processor)  # Runs the node until it's shut down
     image_processor.destroy_node()
     rclpy.shutdown()
-
-# --- Main Execution ---
 
 if __name__ == '__main__':
     main()

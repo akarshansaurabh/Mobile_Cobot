@@ -98,11 +98,15 @@ namespace pointcloud_processing
 
         // ROS subscribers and publishers
         rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr table_detection_sub_;
+
         rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pointcloud_pub_;
         rclcpp::Publisher<geometry_msgs::msg::Vector3>::SharedPtr move_amr_pub_;
         rclcpp::Publisher<geometry_msgs::msg::PoseArray>::SharedPtr box_poses_pub;
         rclcpp::Publisher<geometry_msgs::msg::Polygon>::SharedPtr table_vertices_pub;
+        rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr clear_octamap_pub_;
+        rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr octomap_pub_;
         rclcpp::Publisher<custom_interfaces::msg::TableVertices>::SharedPtr table_vertices_pub_;
+
         rclcpp::Service<custom_interfaces::srv::BoxposeEstimator>::SharedPtr box6dposes_server_;
 
         // TF2 buffer and listener

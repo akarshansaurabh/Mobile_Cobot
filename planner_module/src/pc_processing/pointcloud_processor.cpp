@@ -42,6 +42,8 @@ namespace pointcloud_processing
             "/box_poses_topic", rclcpp::QoS(10));
         table_vertices_pub = this->create_publisher<geometry_msgs::msg::Polygon>(
             "/table_vertices_topic", rclcpp::QoS(10));
+        clear_octamap_pub_ = this->create_publisher<std_msgs::msg::Bool>("/clear_octamap_topic", 10);
+        octomap_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/octomap_topic_", rclcpp::QoS(10));
 
         box6dposes_server_ = this->create_service<custom_interfaces::srv::BoxposeEstimator>(
             "six_d_pose_estimate_service",
@@ -172,7 +174,7 @@ namespace pointcloud_processing
         std::vector<pcl::PointIndices> cluster_indices;
         min_cluster_size_ = 5;
         max_cluster_size_ = 1000;
-        cluster_tolerance_ = 0.01;
+        cluster_tolerance_ = 0.02;
         extractClusters(pcl_cloud, cluster_indices);
         min_cluster_size_ = 50;
         max_cluster_size_ = 1000;
@@ -231,6 +233,29 @@ namespace pointcloud_processing
         }
         else
         {
+            std_msgs::msg::Bool msg;
+            msg.data = true;
+            clear_octamap_pub_->publish(msg);
+
+            sensor_msgs::msg::PointCloud2 empty_cloud;
+
+            empty_cloud.header.stamp = this->get_clock()->now();
+            empty_cloud.header.frame_id = "map";
+            empty_cloud.height = 1;
+            empty_cloud.width = 0;
+            empty_cloud.fields.clear();
+            empty_cloud.data.clear();
+            empty_cloud.is_dense = true;
+            empty_cloud.is_bigendian = false;
+            empty_cloud.point_step = 0;
+            empty_cloud.row_step = 0;
+            std::cout << "emplty pc published" << std::endl;
+            std::cout << "emplty pc published" << std::endl;
+            std::cout << "emplty pc published" << std::endl;
+            std::cout << "emplty pc published" << std::endl;
+            std::cout << "emplty pc published" << std::endl;
+            octomap_pub_->publish(empty_cloud);
+
             RCLCPP_WARN(this->get_logger(), "Box not found in the point cloud.");
         }
     }
@@ -356,21 +381,7 @@ namespace pointcloud_processing
         ec.setSearchMethod(tree);
         ec.setInputCloud(cloud);
         ec.extract(cluster_indices);
-        cout << "number of eclidean cluster = " << cluster_indices.size();
-        // for (const auto &cluster : cluster_indices)
-        //     std::cout << "cluster points " << cluster.indices.size() << std::endl;
-        // std::cout << "___________________________________" << std::endl;
-        if (cluster_indices.size() == 0)
-        {
-            // DBSCAN Clustering
-            pcl::DBSCAN<pcl::PointXYZRGB> dbscan;
-            dbscan.setEps(0.02); // Radius to look for neighbors in, adjust this
-            dbscan.setMinPts(5); // Minimum number of neighbors to be a core point, adjust this
-            dbscan.setSearchMethod(tree);
-            dbscan.setInputCloud(cloud);
-            dbscan.extract(cluster_indices);
-            cout << "number of DBSCAN cluster = " << cluster_indices.size();
-        }
+        cout << "number of eclidean cluster = " << cluster_indices.size() << endl;
     }
 
     void PointCloudProcessor::pointCloudTableDetectionCallback(const sensor_msgs::msg::PointCloud2::ConstSharedPtr &msg)
