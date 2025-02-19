@@ -59,6 +59,7 @@ namespace octoMapGenerator
                 pcl::toROSMsg(*accumulated_cloud_, octomap);
                 octomap.header.stamp = node_->now();
                 octomap.header.frame_id = map_frame_;
+                std::cout<<"PUBLISHING OCTOMAP"<<std::endl;
                 octomap_pub_->publish(octomap);
                 SendRequestFor6DPoseEstimation(0.1, octomap);
             }

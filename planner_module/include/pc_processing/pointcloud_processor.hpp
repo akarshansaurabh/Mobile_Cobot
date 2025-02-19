@@ -21,7 +21,6 @@
 
 #include <pcl/segmentation/sac_segmentation.h>
 #include <pcl/segmentation/extract_clusters.h>
-// #include <pcl/segmentation/dbscan.h>
 
 #include <pcl/features/moment_of_inertia_estimation.h>
 
@@ -61,10 +60,10 @@ namespace pointcloud_processing
         float length;
     };
 
-    class PointCloudProcessor : public rclcpp::Node
+    class PointCloudProcessor 
     {
     public:
-        PointCloudProcessor();
+        PointCloudProcessor(rclcpp::Node::SharedPtr node);
         void initialize();
         ~PointCloudProcessor() = default;
 
@@ -94,7 +93,7 @@ namespace pointcloud_processing
 
         // Parameter callback
         rcl_interfaces::msg::SetParametersResult parameterCallback(const std::vector<rclcpp::Parameter> &parameters);
-        OnSetParametersCallbackHandle::SharedPtr parameter_callback_handle_;
+        rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr parameter_callback_handle_;
 
         // ROS subscribers and publishers
         rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr table_detection_sub_;
@@ -106,6 +105,7 @@ namespace pointcloud_processing
         rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr clear_octamap_pub_;
         rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr octomap_pub_;
         rclcpp::Publisher<custom_interfaces::msg::TableVertices>::SharedPtr table_vertices_pub_;
+        rclcpp::Node::SharedPtr node_;
 
         rclcpp::Service<custom_interfaces::srv::BoxposeEstimator>::SharedPtr box6dposes_server_;
 

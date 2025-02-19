@@ -770,7 +770,6 @@ class ImageProcessing(Node):
         # Accept all parameter changes
         return SetParametersResult(successful=True)
 
-
 def main(args=None):
     rclpy.init(args=args)
     image_processor = ImageProcessing()

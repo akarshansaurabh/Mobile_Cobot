@@ -313,13 +313,9 @@ namespace arm_planner
                             // Wait until callback_triggered is true
                             cv.wait(lock, [&callback_triggered]()
                                     { return callback_triggered; });
-                        }
-
-                        // this->accumulated_cloud_ = stitcher->accumulated_cloud_;
-                        
+                        }                        
                         RCLCPP_INFO(node_->get_logger(), "Snapshot callback triggered, proceeding..."); })
             .detach();
-        // std::this_thread::sleep_for(std::chrono::milliseconds(250));
     }
 
     // Action Callback: Result

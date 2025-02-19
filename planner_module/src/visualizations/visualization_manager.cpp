@@ -14,6 +14,7 @@ namespace visualization
 
     void VisualizationManager::publishMarkerArray(const std::vector<geometry_msgs::msg::Pose> &poses)
     {
+        deleteMarkersInRange(0, 75, "vectors");
         visualization_msgs::msg::MarkerArray marker_array;
         int current_marker_id = 0;
 
@@ -82,6 +83,35 @@ namespace visualization
 
         marker.lifetime = rclcpp::Duration(0, 0);
         marker_array.markers.push_back(marker);
+    }
+
+    void VisualizationManager::deleteMarkersInRange(int start_id, int end_id, const std::string &marker_namespace)
+    {
+        visualization_msgs::msg::MarkerArray marker_array;
+
+        for (int id = start_id; id <= end_id; ++id)
+        {
+            visualization_msgs::msg::Marker marker;
+            marker.header.frame_id = target_frame_;
+            marker.header.stamp = node_->now();
+
+            // Must match the same namespace and ID used when creating them (e.g. "vectors")
+            marker.ns = marker_namespace;
+            marker.id = id;
+            marker.action = visualization_msgs::msg::Marker::DELETE;
+
+            // The type doesn't strictly matter for deletion, but you can set it to the same type
+            // you used when creating. If unknown, you can leave it at 0 or any valid type.
+            marker.type = visualization_msgs::msg::Marker::ARROW;
+            marker_array.markers.push_back(marker);
+        }
+
+        // Publish all the delete commands
+        marker_pub_->publish(marker_array);
+
+        // RCLCPP_INFO(node_->get_logger(),
+        //             "Deleted markers in namespace '%s' with IDs [%d..%d].",
+        //             marker_namespace.c_str(), start_id, end_id);
     }
 
     void VisualizationManager::publishTableVertices(const std::vector<geometry_msgs::msg::Point> &vertices)

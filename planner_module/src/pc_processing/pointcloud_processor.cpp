@@ -1,9 +1,9 @@
 #include "pc_processing/pointcloud_processor.hpp"
-
+//  
 namespace pointcloud_processing
 {
-    PointCloudProcessor::PointCloudProcessor()
-        : Node("pointcloud_processor_node"),
+    PointCloudProcessor::PointCloudProcessor(rclcpp::Node::SharedPtr node)
+        : node_(node),
           target_frame_("map"),
           base_frame_("base_link"),
           voxel_grid_leaf_size_(0.01f),
@@ -26,41 +26,43 @@ namespace pointcloud_processing
           table_detection_counter_(0)
     {
         // Initialize TF2 buffer and listener
-        tf_buffer_ = std::make_shared<tf2_ros::Buffer>(this->get_clock());
+        tf_buffer_ = std::make_shared<tf2_ros::Buffer>(node_->get_clock());
         tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
+        vis_manager_ = std::make_shared<visualization::VisualizationManager>(node_);
 
         // Parameter callback
-        parameter_callback_handle_ = this->add_on_set_parameters_callback(
+        parameter_callback_handle_ = node_->add_on_set_parameters_callback(
             std::bind(&PointCloudProcessor::parameterCallback, this, std::placeholders::_1));
 
         // Publisher for the processed point cloud
-        pointcloud_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(
+        pointcloud_pub_ = node_->create_publisher<sensor_msgs::msg::PointCloud2>(
             "/arm_rgbd_camera/processed_pc", rclcpp::QoS(10));
-        move_amr_pub_ = this->create_publisher<geometry_msgs::msg::Vector3>(
+        move_amr_pub_ = node_->create_publisher<geometry_msgs::msg::Vector3>(
             "/move_amr_topic", rclcpp::QoS(10));
-        box_poses_pub = this->create_publisher<geometry_msgs::msg::PoseArray>(
+        box_poses_pub = node_->create_publisher<geometry_msgs::msg::PoseArray>(
             "/box_poses_topic", rclcpp::QoS(10));
-        table_vertices_pub = this->create_publisher<geometry_msgs::msg::Polygon>(
+        table_vertices_pub = node_->create_publisher<geometry_msgs::msg::Polygon>(
             "/table_vertices_topic", rclcpp::QoS(10));
-        clear_octamap_pub_ = this->create_publisher<std_msgs::msg::Bool>("/clear_octamap_topic", 10);
-        octomap_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/octomap_topic_", rclcpp::QoS(10));
+        clear_octamap_pub_ = node_->create_publisher<std_msgs::msg::Bool>("/clear_octamap_topic", 10);
 
-        box6dposes_server_ = this->create_service<custom_interfaces::srv::BoxposeEstimator>(
+        octomap_pub_ = node_->create_publisher<sensor_msgs::msg::PointCloud2>("/octomap_topic_", rclcpp::QoS(10));
+
+        box6dposes_server_ = node_->create_service<custom_interfaces::srv::BoxposeEstimator>(
             "six_d_pose_estimate_service",
             std::bind(&PointCloudProcessor::Server6DPoseCallback, this,
                       std::placeholders::_1, std::placeholders::_2));
 
         // Declare parameters
-        this->declare_parameter("pc_processing_param", "stop");
+        node_->declare_parameter("pc_processing_param", "stop");
 
         way_point_generator_ = std::make_shared<waypointGen::TableWayPointGen>();
 
-        nav2_actionclient_param_client_ = std::make_shared<rclcpp::AsyncParametersClient>(this, "nav2_client3_node");
+        nav2_actionclient_param_client_ = std::make_shared<rclcpp::AsyncParametersClient>(node_, "nav2_client3_node");
     }
 
     void PointCloudProcessor::initialize()
     {
-        vis_manager_ = std::make_shared<visualization::VisualizationManager>(shared_from_this());
+        // vis_manager_ = std::make_shared<visualization::VisualizationManager>(shared_from_this());
     }
 
     // Callback for processing parameters
@@ -82,26 +84,26 @@ namespace pointcloud_processing
                     min_cluster_size_ = 30;
                     max_cluster_size_ = 1000;
                     processing_mode_ = param.as_string();
-                    RCLCPP_INFO(this->get_logger(), "Processing mode set to: '%s'", processing_mode_.c_str());
+                    RCLCPP_INFO(node_->get_logger(), "Processing mode set to: '%s'", processing_mode_.c_str());
                     ransac_success_ = false;
                     if (processing_mode_ == "detect_boxes")
                     {
                     }
                     else if (processing_mode_ == "detect_table")
                     {
-                        table_detection_sub_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
+                        table_detection_sub_ = node_->create_subscription<sensor_msgs::msg::PointCloud2>(
                             "/arm_rgbd_camera/points", rclcpp::QoS(10),
                             std::bind(&PointCloudProcessor::pointCloudTableDetectionCallback, this, std::placeholders::_1));
                     }
                     else
                     {
                         // Unrecognized mode
-                        RCLCPP_WARN(this->get_logger(), "Unrecognized processing mode: '%s'", processing_mode_.c_str());
+                        RCLCPP_WARN(node_->get_logger(), "Unrecognized processing mode: '%s'", processing_mode_.c_str());
                     }
                 }
                 else
                 {
-                    RCLCPP_ERROR(this->get_logger(), "Invalid type for 'pc_processing_param'. Expected string.");
+                    RCLCPP_ERROR(node_->get_logger(), "Invalid type for 'pc_processing_param'. Expected string.");
                     result.successful = false;
                     result.reason = "Invalid parameter type.";
                 }
@@ -115,7 +117,7 @@ namespace pointcloud_processing
     {
         if (!nav2_actionclient_param_client_->wait_for_service(10s))
         {
-            RCLCPP_ERROR(this->get_logger(), "destination parameter service not available.");
+            RCLCPP_ERROR(node_->get_logger(), "destination parameter service not available.");
             return;
         }
 
@@ -132,19 +134,19 @@ namespace pointcloud_processing
             {
                 if (!results[i].successful)
                 {
-                    RCLCPP_ERROR(this->get_logger(), "Failed to set parameter '%s': %s",
+                    RCLCPP_ERROR(node_->get_logger(), "Failed to set parameter '%s': %s",
                                  params[i].get_name().c_str(), results[i].reason.c_str());
                 }
                 else
                 {
-                    RCLCPP_INFO(this->get_logger(), "Successfully set parameter '%s'",
+                    RCLCPP_INFO(node_->get_logger(), "Successfully set parameter '%s'",
                                 params[i].get_name().c_str());
                 }
             }
         }
         catch (const std::exception &e)
         {
-            RCLCPP_ERROR(this->get_logger(), "Exception while setting parameters: %s", e.what());
+            RCLCPP_ERROR(node_->get_logger(), "Exception while setting parameters: %s", e.what());
         } })
             .detach();
     }
@@ -166,7 +168,7 @@ namespace pointcloud_processing
         filterPointCloudInROI(pcl_cloud, request->cloud.header, table_vertices, min_x, max_x, min_y, max_y);
         if (pcl_cloud->empty())
         {
-            RCLCPP_WARN(this->get_logger(), "No points remain after ROI filtering.");
+            RCLCPP_WARN(node_->get_logger(), "No points remain after ROI filtering.");
             return;
         }
 
@@ -220,7 +222,7 @@ namespace pointcloud_processing
                 box_poses_msg.poses.push_back(std::move(pose));
             box_poses_pub->publish(box_poses_msg);
 
-            RCLCPP_INFO(this->get_logger(), "Box found in the point cloud.");
+            RCLCPP_INFO(node_->get_logger(), "Box found in the point cloud.");
             pcl_cloud.swap(top_faces);
             vis_manager_->publishMarkerArray(box_poses);
 
@@ -236,27 +238,7 @@ namespace pointcloud_processing
             std_msgs::msg::Bool msg;
             msg.data = true;
             clear_octamap_pub_->publish(msg);
-
-            sensor_msgs::msg::PointCloud2 empty_cloud;
-
-            empty_cloud.header.stamp = this->get_clock()->now();
-            empty_cloud.header.frame_id = "map";
-            empty_cloud.height = 1;
-            empty_cloud.width = 0;
-            empty_cloud.fields.clear();
-            empty_cloud.data.clear();
-            empty_cloud.is_dense = true;
-            empty_cloud.is_bigendian = false;
-            empty_cloud.point_step = 0;
-            empty_cloud.row_step = 0;
-            std::cout << "emplty pc published" << std::endl;
-            std::cout << "emplty pc published" << std::endl;
-            std::cout << "emplty pc published" << std::endl;
-            std::cout << "emplty pc published" << std::endl;
-            std::cout << "emplty pc published" << std::endl;
-            octomap_pub_->publish(empty_cloud);
-
-            RCLCPP_WARN(this->get_logger(), "Box not found in the point cloud.");
+            RCLCPP_WARN(node_->get_logger(), "Box not found in the point cloud.");
         }
     }
 
@@ -308,7 +290,7 @@ namespace pointcloud_processing
         }
         catch (tf2::TransformException &ex)
         {
-            RCLCPP_WARN(this->get_logger(), "Transform error: %s", ex.what());
+            RCLCPP_WARN(node_->get_logger(), "Transform error: %s", ex.what());
             return false;
         }
     }
@@ -407,7 +389,7 @@ namespace pointcloud_processing
 
         if (tableIsPresent(pcl_cloud, table_vertices, msg->header.stamp))
         {
-            RCLCPP_INFO(this->get_logger(), "Table detected.");
+            RCLCPP_INFO(node_->get_logger(), "Table detected.");
             vis_manager_->publishTableVertices(table_vertices);
             // compute the distance and send it to client
             if (table_detection_counter_ == 1)
@@ -422,7 +404,7 @@ namespace pointcloud_processing
                 }
                 catch (tf2::TransformException &ex)
                 {
-                    RCLCPP_WARN(this->get_logger(), "Transform error: %s", ex.what());
+                    RCLCPP_WARN(node_->get_logger(), "Transform error: %s", ex.what());
                     return;
                 }
                 robot_position.x = transform_stamped.transform.translation.x;
@@ -723,17 +705,17 @@ namespace pointcloud_processing
             pcl::ModelCoefficients::Ptr coefficients(new pcl::ModelCoefficients);
             pcl::PointIndices::Ptr inliers(new pcl::PointIndices);
             seg.setInputCloud(cluster_cloud);
-            RCLCPP_INFO(this->get_logger(), "RANSAC STARTED.");
+            RCLCPP_INFO(node_->get_logger(), "RANSAC STARTED.");
             seg.segment(*inliers, *coefficients);
 
             if (inliers->indices.size() == 0)
             {
-                RCLCPP_ERROR(this->get_logger(), "RANSAC FAILED BECAUSE OF LESS POINTS");
+                RCLCPP_ERROR(node_->get_logger(), "RANSAC FAILED BECAUSE OF LESS POINTS");
                 break;
             }
             else
             {
-                RCLCPP_INFO(this->get_logger(), "RANSAC SUCCESSFUL");
+                RCLCPP_INFO(node_->get_logger(), "RANSAC SUCCESSFUL");
             }
 
             // Calculate plane normal
@@ -825,7 +807,7 @@ namespace pointcloud_processing
 
         if (cluster_cloud->empty())
         {
-            RCLCPP_ERROR(this->get_logger(), "Input cluster cloud is empty.");
+            RCLCPP_ERROR(node_->get_logger(), "Input cluster cloud is empty.");
             return false;
         }
 
@@ -851,7 +833,7 @@ namespace pointcloud_processing
 
             if (inliers->indices.size() == 0)
             {
-                RCLCPP_INFO(this->get_logger(), "RANSAC could not find more planes or no more points left.");
+                RCLCPP_INFO(node_->get_logger(), "RANSAC could not find more planes or no more points left.");
                 break; // No more planes found
             }
 
@@ -875,7 +857,7 @@ namespace pointcloud_processing
 
         if (plane_coefficients.size() < 3)
         {
-            RCLCPP_ERROR(this->get_logger(), "Found less than 3 planes, cannot compute 6D pose reliably.");
+            RCLCPP_ERROR(node_->get_logger(), "Found less than 3 planes, cannot compute 6D pose reliably.");
             return false;
         }
 

@@ -15,10 +15,9 @@ int main(int argc, char **argv)
     auto collision_objs = fcl_->buildFCLCollisionObjectsInParallel();
     arm_planner::ArmController action_client_obj(node, kinematics_solver, collision_objs);
 
-    rclcpp::executors::MultiThreadedExecutor executor(rclcpp::ExecutorOptions(), 12);
+    rclcpp::executors::MultiThreadedExecutor executor(rclcpp::ExecutorOptions(), 6);
     executor.add_node(node);
     executor.spin();
-    // rclcpp::spin(node);
     rclcpp::shutdown();
     return 0;
 }
