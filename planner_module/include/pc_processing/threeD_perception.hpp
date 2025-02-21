@@ -57,6 +57,8 @@
 #include <future>
 #include <limits>
 
+#include "miscellaneous/conversion.hpp"
+
 namespace environment3DPerception
 {
     enum class PerceptionObject
@@ -80,9 +82,24 @@ namespace environment3DPerception
     namespace SegmentationCondition
     {
         pcl::PointCloud<pcl::PointXYZRGBNormal>::Ptr cleanCloud(const pcl::PointCloud<pcl::PointXYZRGBNormal>::Ptr &cloud_with_normals,
-                                                      pcl::search::KdTree<pcl::PointXYZRGBNormal>::Ptr &tree, int K);
+                                                                pcl::search::KdTree<pcl::PointXYZRGBNormal>::Ptr &tree, int K);
         bool tableLegCondition(const pcl::PointXYZRGBNormal &p1, const pcl::PointXYZRGBNormal &p2, float squared_distance);
     }
+
+    class ShapeExtraction
+    {
+    private:
+        void computeAABB(const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud, Eigen::Vector3f &min_pt, Eigen::Vector3f &max_pt);
+        bool fitCylinder(const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud, pcl::PointCloud<pcl::Normal>::Ptr normals, pcl::ModelCoefficients::Ptr &coefficients);
+        int countPointsInsideAABB(const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud, const Eigen::Vector3f &min_pt, const Eigen::Vector3f &max_pt);
+        int countPointsInsideCylinder(const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud, const pcl::ModelCoefficients::Ptr &cyl_coeffs, float extra_padding = 0.0f);
+        std::shared_ptr<visualization::VisualizationManager> viz_manager_;
+
+    public:
+        ShapeExtraction(std::shared_ptr<visualization::VisualizationManager> viz_manager);
+        visualization::Shape3D fitBestBoundingBox(const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud, pcl::PointCloud<pcl::Normal>::Ptr normals,
+                                                  float Rc, float Gc, float Bc);
+    };
 
     class Environment3DPerception
     {
@@ -92,8 +109,9 @@ namespace environment3DPerception
         ~Environment3DPerception() = default;
 
     private:
+        vector<vector<float>> colour, original_colour;
         // ros2 callbacks
-        rcl_interfaces::msg::SetParametersResult onParameterEvent(const std::vector<rclcpp::Parameter> &parameters);
+        rcl_interfaces::msg::SetParametersResult ParameterCallback(const std::vector<rclcpp::Parameter> &parameters);
         void timerCallback();
         void frontCameraCallback(const sensor_msgs::msg::PointCloud2::SharedPtr msg);
         void armCameraCallback(const sensor_msgs::msg::PointCloud2::SharedPtr msg);
@@ -127,18 +145,17 @@ namespace environment3DPerception
         std::atomic<bool> front_camera_received_;
         std::atomic<bool> arm_camera_received_;
 
+        std::shared_ptr<visualization::VisualizationManager> viz_manager_;
+        std::unique_ptr<ShapeExtraction> shape_extraction;
+
         // -------------- Segmentation Pipeline --------------
-        // Build a 3-level segmentation tree:
-        //  - Root: entire scene
-        //  - Children: walls, floor, object
-        //  - For "object": further sub-clustering => each sub-object is a child
+        // Build a 4-level segmentation tree:
         std::shared_ptr<SegmentTreeNode> Construct3DScene_SegmentationTree(const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &input_cloud);
         pcl::PointCloud<pcl::PointXYZRGB>::Ptr extractAllVerticalPlanes(pcl::PointCloud<pcl::PointXYZRGB>::Ptr working_cloud, float min_inliers);
         pcl::PointCloud<pcl::PointXYZRGB>::Ptr extractFloorPlane(pcl::PointCloud<pcl::PointXYZRGB>::Ptr working_cloud, float min_inliers);
         void subdivideObjectNode(std::shared_ptr<SegmentTreeNode> object_node);
-        std::vector<pcl::PointCloud<pcl::PointXYZRGBNormal>::Ptr>
-        segmentTableLegsConditionalWithCleaning(const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &input_cloud);
-        void traverseSegmentationTree(const std::shared_ptr<SegmentTreeNode> &node, pcl::PointCloud<pcl::PointXYZRGB>::Ptr segmented_pcl_cloud);
+        void segmentTableLegsConditionalWithCleaning(std::shared_ptr<SegmentTreeNode> &object_node);
+        void traverseSegmentationTree(const std::shared_ptr<SegmentTreeNode> &node, pcl::PointCloud<pcl::PointXYZRGB>::Ptr segmented_pcl_cloud, int level);
     };
 }
 

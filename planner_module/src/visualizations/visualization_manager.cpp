@@ -10,6 +10,7 @@ namespace visualization
             "/box_marker_array", rclcpp::QoS(10));
 
         node_->get_parameter_or<std::string>("target_frame_", target_frame_, "map");
+        this->id_ = 0;
     }
 
     void VisualizationManager::publishMarkerArray(const std::vector<geometry_msgs::msg::Pose> &poses)
@@ -310,4 +311,55 @@ namespace visualization
         marker_pub_->publish(marker_array);
         RCLCPP_INFO(node_->get_logger(), "Published path line strip and orientation frames.");
     }
+
+    void VisualizationManager::publishCuboidMarker(const Shape3D &shape_3d)
+    {
+        visualization_msgs::msg::Marker marker;
+        marker.header.frame_id = target_frame_;
+        marker.header.stamp = node_->now();
+        marker.ns = "cuboid";
+        marker.id = this->id_;
+        marker.type = visualization_msgs::msg::Marker::CUBE;
+        marker.action = visualization_msgs::msg::Marker::ADD;
+        marker.pose = shape_3d.pose;
+        marker.scale.x = shape_3d.L;
+        marker.scale.y = shape_3d.B;
+        marker.scale.z = shape_3d.H;
+        marker.color.r = shape_3d.r;
+        marker.color.g = shape_3d.g;
+        marker.color.b = shape_3d.b;
+        marker.color.a = 1.0;                     // Fully opaque
+        marker.lifetime = rclcpp::Duration(0, 0); // Marker persists indefinitely
+
+        visualization_msgs::msg::MarkerArray marker_array;
+        marker_array.markers.push_back(marker);
+        marker_pub_->publish(marker_array);
+        this->id_++;
+    }
+
+    void VisualizationManager::publishCylinderMarker(const Shape3D &shape_3d)
+    {
+        visualization_msgs::msg::Marker marker;
+        marker.header.frame_id = target_frame_;
+        marker.header.stamp = node_->now();
+        marker.ns = "cylinder";
+        marker.id = this->id_;
+        marker.type = visualization_msgs::msg::Marker::CYLINDER;
+        marker.action = visualization_msgs::msg::Marker::ADD;
+        marker.pose = shape_3d.pose;
+        marker.scale.x = (2.0 * shape_3d.R);
+        marker.scale.y = (2.0 * shape_3d.R);
+        marker.scale.z = shape_3d.h;
+        marker.color.r = shape_3d.r;
+        marker.color.g = shape_3d.g;
+        marker.color.b = shape_3d.b;
+        marker.color.a = 1.0;                     // Fully opaque
+        marker.lifetime = rclcpp::Duration(0, 0); // Marker persists indefinitely
+
+        visualization_msgs::msg::MarkerArray marker_array;
+        marker_array.markers.push_back(marker);
+        marker_pub_->publish(marker_array);
+        this->id_++;
+    }
+
 }

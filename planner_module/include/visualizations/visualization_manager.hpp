@@ -15,6 +15,20 @@
 
 namespace visualization
 {
+    enum class Shapes
+    {
+        CUBOID,
+        CYLINDER
+    };
+
+    struct Shape3D
+    {
+        Shapes shape3d;
+        geometry_msgs::msg::Pose pose;
+        float r, g, b;
+        double L, B, H, R, h;
+    };
+
     class VisualizationManager
     {
     public:
@@ -28,6 +42,12 @@ namespace visualization
                                                                   int id, const std::string &frame_id);
         rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr marker_pub_;
         void deleteMarkersInRange(int start_id, int end_id, const std::string &marker_namespace);
+        // New method for publishing a cuboid marker with arbitrary orientation.
+        void publishCuboidMarker(const Shape3D &shape_3d);
+
+        // New method for publishing a cylinder marker with arbitrary orientation.
+        void publishCylinderMarker(const Shape3D &shape_3d);
+        int id_;
 
     private:
         void visualizeVector(const geometry_msgs::msg::Point &origin, const geometry_msgs::msg::Vector3 &vector, int id,

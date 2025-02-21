@@ -2,6 +2,267 @@
 
 namespace environment3DPerception
 {
+    ShapeExtraction::ShapeExtraction(std::shared_ptr<visualization::VisualizationManager> viz_manager)
+    {
+        viz_manager_ = viz_manager;
+    }
+
+    void ShapeExtraction::computeAABB(const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud, Eigen::Vector3f &min_pt, Eigen::Vector3f &max_pt)
+    {
+        pcl::PointXYZRGB min_p, max_p;
+        pcl::getMinMax3D(*cloud, min_p, max_p);
+        min_pt << min_p.x, min_p.y, min_p.z;
+        max_pt << max_p.x, max_p.y, max_p.z;
+    }
+    bool ShapeExtraction::fitCylinder(const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud, pcl::PointCloud<pcl::Normal>::Ptr normals, pcl::ModelCoefficients::Ptr &coefficients)
+    {
+        pcl::SACSegmentationFromNormals<pcl::PointXYZRGB, pcl::Normal> seg;
+        seg.setOptimizeCoefficients(true);
+        seg.setModelType(pcl::SACMODEL_CYLINDER);
+        seg.setMethodType(pcl::SAC_RANSAC);
+        seg.setNormalDistanceWeight(0.1);
+        seg.setMaxIterations(1000);
+        seg.setDistanceThreshold(0.0175);
+        seg.setRadiusLimits(0.0, 9999.0);
+        seg.setInputCloud(cloud);
+        seg.setInputNormals(normals);
+
+        pcl::PointIndices::Ptr inliers(new pcl::PointIndices);
+        seg.segment(*inliers, *coefficients);
+
+        if (inliers->indices.empty())
+        {
+            return false;
+        }
+        return true;
+    }
+    int ShapeExtraction::countPointsInsideAABB(const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud, const Eigen::Vector3f &min_pt, const Eigen::Vector3f &max_pt)
+    {
+        int inside_count = 0;
+        for (const auto &pt : cloud->points)
+        {
+            if (pt.x >= min_pt.x() && pt.x <= max_pt.x() &&
+                pt.y >= min_pt.y() && pt.y <= max_pt.y() &&
+                pt.z >= min_pt.z() && pt.z <= max_pt.z())
+                inside_count++;
+        }
+        return inside_count;
+    }
+    int ShapeExtraction::countPointsInsideCylinder(const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud, const pcl::ModelCoefficients::Ptr &cyl_coeffs, float extra_padding)
+    {
+        // Axis point
+        Eigen::Vector3f axis_pt(cyl_coeffs->values[0],
+                                cyl_coeffs->values[1],
+                                cyl_coeffs->values[2]);
+        // Axis direction
+        Eigen::Vector3f axis_dir(cyl_coeffs->values[3],
+                                 cyl_coeffs->values[4],
+                                 cyl_coeffs->values[5]);
+        axis_dir.normalize();
+        float radius = cyl_coeffs->values[6] + extra_padding;
+
+        float min_proj = 1e9f, max_proj = -1e9f;
+        for (const auto &pt : cloud->points)
+        {
+            Eigen::Vector3f p(pt.x, pt.y, pt.z);
+            float proj = axis_dir.dot(p - axis_pt);
+            if (proj < min_proj)
+                min_proj = proj;
+            if (proj > max_proj)
+                max_proj = proj;
+        }
+
+        int inside_count = 0;
+        for (const auto &pt : cloud->points)
+        {
+            Eigen::Vector3f p(pt.x, pt.y, pt.z);
+            float proj = axis_dir.dot(p - axis_pt);
+            if (proj >= min_proj && proj <= max_proj)
+            {
+                Eigen::Vector3f radial_vec = (p - axis_pt) - proj * axis_dir;
+                float rdist = radial_vec.norm();
+                if (rdist <= radius)
+                    inside_count++;
+            }
+        }
+        return inside_count;
+    }
+    visualization::Shape3D ShapeExtraction::fitBestBoundingBox(const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud, pcl::PointCloud<pcl::Normal>::Ptr normals,
+                                                               float Rc, float Gc, float Bc)
+    {
+        visualization::Shape3D ans;
+        ans.r = Rc;
+        ans.g = Gc;
+        ans.b = Bc;
+        // cuboid
+        Eigen::Vector3f min_pt, max_pt;
+        computeAABB(cloud, min_pt, max_pt);
+
+        float aabb_volume = (max_pt.x() - min_pt.x()) *
+                            (max_pt.y() - min_pt.y()) *
+                            (max_pt.z() - min_pt.z());
+
+        int inside_aabb = countPointsInsideAABB(cloud, min_pt, max_pt);
+        float ratio_aabb = inside_aabb / static_cast<float>(cloud->size());
+
+        // 2) Cylinder
+        pcl::ModelCoefficients::Ptr cyl_coeffs(new pcl::ModelCoefficients);
+        bool cyl_ok = fitCylinder(cloud, normals, cyl_coeffs);
+        float cyl_volume = 999999.0f;
+        float ratio_cyl = 0.0f;
+
+        if (cyl_ok)
+        {
+            Eigen::Vector3f axis_pt(cyl_coeffs->values[0], cyl_coeffs->values[1], cyl_coeffs->values[2]);
+            Eigen::Vector3f axis_dir(cyl_coeffs->values[3], cyl_coeffs->values[4], cyl_coeffs->values[5]);
+            axis_dir.normalize();
+            Eigen::Vector3f z_cap = axis_dir;
+            // find min_proj, max_proj along axis
+            float min_proj = 1e9f, max_proj = -1e9f;
+            int index = 0;
+            for (const auto &pt : cloud->points)
+            {
+                Eigen::Vector3f p(pt.x, pt.y, pt.z);
+                float proj = axis_dir.dot(p - axis_pt);
+                if (index == 0)
+                {
+                    index = 1;
+                    Eigen::Vector3f radial_vec = (p - axis_pt) - (proj * axis_dir);
+                    radial_vec.normalize();
+                    Eigen::Vector3f y_cap = radial_vec;
+                    Eigen::Vector3f x_cap = y_cap.cross(z_cap);
+                    x_cap.normalize();
+                    Eigen::Matrix3d rot;
+                    rot << x_cap(0), y_cap(0), z_cap(0),
+                        x_cap(1), y_cap(1), z_cap(1),
+                        x_cap(2), y_cap(2), z_cap(2);
+                    ans.pose.orientation = Conversions::EigenM_2ROSQuat(rot);
+                }
+
+                if (proj < min_proj)
+                    min_proj = proj;
+                if (proj > max_proj)
+                    max_proj = proj;
+            }
+            float height = max_proj - min_proj;
+            float radius = cyl_coeffs->values[6];
+            ans.pose.position.x = (min_proj * axis_dir.x()) + ((height / 2.0) * axis_dir.x());
+            ans.pose.position.y = (min_proj * axis_dir.y()) + ((height / 2.0) * axis_dir.y());
+            ans.pose.position.z = (min_proj * axis_dir.z()) + ((height / 2.0) * axis_dir.z());
+            ans.R = radius;
+            ans.H = height;
+            cyl_volume = static_cast<float>(M_PI) * radius * radius * height;
+            int inside_cyl = countPointsInsideCylinder(cloud, cyl_coeffs);
+            ratio_cyl = inside_cyl / static_cast<float>(cloud->size());
+        }
+
+        // // 3) Compare which shape is "better"
+
+        // if (std::fabs(aabb_volume - cyl_volume) < 1e-3)
+        // {
+        //     if (ratio_aabb > ratio_cyl)
+        //     {
+        //         ans.shape3d = visualization::Shapes::CUBOID;
+        //         ans.pose.position.x = (max_pt.x() + min_pt.x()) / 2.0;
+        //         ans.pose.position.y = (max_pt.y() + min_pt.y()) / 2.0;
+        //         ans.pose.position.z = (max_pt.z() + min_pt.z()) / 2.0;
+        //         Eigen::Matrix3d rot;
+        //         rot.setIdentity();
+        //         ans.pose.orientation = Conversions::EigenM_2ROSQuat(rot);
+        //         ans.L = (max_pt.x() - min_pt.x());
+        //         ans.B = (max_pt.y() - min_pt.y());
+        //         ans.H = (max_pt.z() - min_pt.z());
+        //     }
+        //     else
+        //     {
+        //         // return BoundingShapeResult{"Cylinder", cyl_volume, ratio_cyl};
+        //         ans.shape3d = visualization::Shapes::CYLINDER;
+        //     }
+        // }
+        // else if (aabb_volume < cyl_volume)
+        // {
+        //     // return BoundingShapeResult{"AABB", aabb_volume, ratio_aabb};
+        //     ans.shape3d = visualization::Shapes::CUBOID;
+        //     geometry_msgs::msg::Pose pose;
+        //     ans.pose.position.x = (max_pt.x() + min_pt.x()) / 2.0;
+        //     ans.pose.position.y = (max_pt.y() + min_pt.y()) / 2.0;
+        //     ans.pose.position.z = (max_pt.z() + min_pt.z()) / 2.0;
+        //     Eigen::Matrix3d rot;
+        //     rot.setIdentity();
+        //     ans.pose.orientation = Conversions::EigenM_2ROSQuat(rot);
+        //     ans.L = (max_pt.x() - min_pt.x());
+        //     ans.B = (max_pt.y() - min_pt.y());
+        //     ans.H = (max_pt.z() - min_pt.z());
+        // }
+        // else
+        // {
+        //     ans.shape3d = visualization::Shapes::CYLINDER;
+        // }
+
+        if (std::fabs(ratio_aabb - ratio_cyl) < 1e-3)
+        {
+            if (aabb_volume < cyl_volume)
+            {
+                ans.shape3d = visualization::Shapes::CUBOID;
+                ans.pose.position.x = (max_pt.x() + min_pt.x()) / 2.0;
+                ans.pose.position.y = (max_pt.y() + min_pt.y()) / 2.0;
+                ans.pose.position.z = (max_pt.z() + min_pt.z()) / 2.0;
+                Eigen::Matrix3d rot;
+                rot.setIdentity();
+                ans.pose.orientation = Conversions::EigenM_2ROSQuat(rot);
+                ans.L = (max_pt.x() - min_pt.x());
+                ans.B = (max_pt.y() - min_pt.y());
+                ans.H = (max_pt.z() - min_pt.z());
+            }
+            else
+            {
+                // return BoundingShapeResult{"Cylinder", cyl_volume, ratio_cyl};
+                ans.shape3d = visualization::Shapes::CYLINDER;
+            }
+        }
+        else if (ratio_aabb > ratio_cyl)
+        {
+            // return BoundingShapeResult{"AABB", aabb_volume, ratio_aabb};
+            ans.shape3d = visualization::Shapes::CUBOID;
+            geometry_msgs::msg::Pose pose;
+            ans.pose.position.x = (max_pt.x() + min_pt.x()) / 2.0;
+            ans.pose.position.y = (max_pt.y() + min_pt.y()) / 2.0;
+            ans.pose.position.z = (max_pt.z() + min_pt.z()) / 2.0;
+            Eigen::Matrix3d rot;
+            rot.setIdentity();
+            ans.pose.orientation = Conversions::EigenM_2ROSQuat(rot);
+            ans.L = (max_pt.x() - min_pt.x());
+            ans.B = (max_pt.y() - min_pt.y());
+            ans.H = (max_pt.z() - min_pt.z());
+        }
+        else
+        {
+            ans.shape3d = visualization::Shapes::CYLINDER;
+        }
+
+        if (ans.shape3d == visualization::Shapes::CUBOID)
+        {
+            for (int aa = 0; aa < 10; aa++)
+            {
+                viz_manager_->publishCuboidMarker(ans);
+                // viz_manager_->id_--;
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            }
+        }
+        else if (ans.shape3d == visualization::Shapes::CYLINDER)
+        {
+            for (int aa = 0; aa < 10; aa++)
+            {
+                viz_manager_->publishCylinderMarker(ans);
+                // viz_manager_->id_--;
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            }
+            std::cout << "cylinder " << std::endl;
+        }
+
+        return ans;
+    }
+
     Environment3DPerception::Environment3DPerception(rclcpp::Node::SharedPtr node)
         : node_(node),
           front_sub_(nullptr),
@@ -10,9 +271,10 @@ namespace environment3DPerception
           arm_camera_received_(false)
     {
         environment_3d_pointcloud_.reset(new pcl::PointCloud<pcl::PointXYZRGB>);
+        viz_manager_ = std::make_shared<visualization::VisualizationManager>(node);
+        shape_extraction = std::make_unique<ShapeExtraction>(viz_manager_);
 
-        octomap_pub_ = node_->create_publisher<sensor_msgs::msg::PointCloud2>(
-            "/octomap_topic_", rclcpp::QoS(10));
+        octomap_pub_ = node_->create_publisher<sensor_msgs::msg::PointCloud2>("/octomap_topic_", rclcpp::QoS(10));
 
         tf_buffer_ = std::make_unique<tf2_ros::Buffer>(node_->get_clock());
         tf_listener_ = std::make_unique<tf2_ros::TransformListener>(*tf_buffer_);
@@ -20,7 +282,7 @@ namespace environment3DPerception
         node_->declare_parameter<std::string>("activate_3d_perception", "F");
         node_->get_parameter("activate_3d_perception", activate_3d_perception_);
 
-        parameter_callback_handle_ = node_->add_on_set_parameters_callback(std::bind(&Environment3DPerception::onParameterEvent, this, std::placeholders::_1));
+        parameter_callback_handle_ = node_->add_on_set_parameters_callback(std::bind(&Environment3DPerception::ParameterCallback, this, std::placeholders::_1));
 
         if (activate_3d_perception_ == "T")
         {
@@ -30,21 +292,46 @@ namespace environment3DPerception
         }
         else
             RCLCPP_INFO(node_->get_logger(), "activate_3d_perception is false at startup. No timer created.");
+
+        original_colour = {
+            {0.0, 0.0, 255.0},     // Blue
+            {255.0, 20.0, 203.0},  // Dark Pink
+            {255.0, 255.0, 0.0},   // Yellow
+            {255.0, 165.0, 0.0},   // Orange
+            {128.0, 0.0, 128.0},   // Purple
+            {128.0, 128.0, 128.0}, // Grey
+            {0.0, 100.0, 0.0},     // Dark Green
+            {255.0, 255.0, 255.0}, // White
+            {0.0, 0.0, 0.0},       // Black
+            {0.0, 255.0, 255.0},   // Cyan
+            {255.0, 0.0, 255.0},   // Magenta
+            {139.0, 69.0, 19.0},   // Brown
+            {75.0, 0.0, 130.0},    // Indigo
+            {173.0, 216.0, 230.0}, // Light Blue
+            {240.0, 128.0, 128.0}, // Light Coral
+            {34.0, 139.0, 34.0},   // Forest Green
+            {255.0, 215.0, 0.0},   // Gold
+            {192.0, 192.0, 192.0}  // Silver
+        };
+
+        colour = original_colour;
     }
 
-    void Environment3DPerception::traverseSegmentationTree(const std::shared_ptr<SegmentTreeNode> &node, pcl::PointCloud<pcl::PointXYZRGB>::Ptr segmented_pcl_cloud)
+    void Environment3DPerception::traverseSegmentationTree(const std::shared_ptr<SegmentTreeNode> &node, pcl::PointCloud<pcl::PointXYZRGB>::Ptr segmented_pcl_cloud, int level)
     {
         if (!node)
-        {
-            std::cout << "NULL CHILD = 3" << std::endl;
             return;
-        }
+
+        for (int i = 0; i < level + 1; i++)
+            std::cout << " ";
+        std::cout << "A" << std::endl;
+
         *segmented_pcl_cloud += *node->object_cloud;
         for (auto &child : node->children)
-            traverseSegmentationTree(child, segmented_pcl_cloud);
+            traverseSegmentationTree(child, segmented_pcl_cloud, level + 1);
     }
 
-    rcl_interfaces::msg::SetParametersResult Environment3DPerception::onParameterEvent(const std::vector<rclcpp::Parameter> &parameters)
+    rcl_interfaces::msg::SetParametersResult Environment3DPerception::ParameterCallback(const std::vector<rclcpp::Parameter> &parameters)
     {
         std::cout << "param callback called" << std::endl;
         for (auto &param : parameters)
@@ -93,6 +380,7 @@ namespace environment3DPerception
         if (!front_sub_ && !arm_sub_)
         {
             RCLCPP_INFO(node_->get_logger(), "Creating subscribers for front and arm cameras...");
+            colour = original_colour;
 
             front_camera_received_.store(false);
             arm_camera_received_.store(false);
@@ -238,7 +526,7 @@ namespace environment3DPerception
         // Convert PCL->ROS
         sensor_msgs::msg::PointCloud2 ros_cloud;
         pcl::PointCloud<pcl::PointXYZRGB>::Ptr segmented_pcl_cloud(new pcl::PointCloud<pcl::PointXYZRGB>());
-        traverseSegmentationTree(root, segmented_pcl_cloud);
+        traverseSegmentationTree(root, segmented_pcl_cloud, 0);
 
         pcl::toROSMsg(*segmented_pcl_cloud, ros_cloud);
         ros_cloud.header.frame_id = "map";
@@ -256,6 +544,7 @@ namespace environment3DPerception
 
     std::shared_ptr<SegmentTreeNode> Environment3DPerception::Construct3DScene_SegmentationTree(const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &input_cloud)
     {
+        viz_manager_->id_ = 0;
         // Create the root node
         auto root = std::make_shared<SegmentTreeNode>();
         auto null_child = std::make_shared<SegmentTreeNode>();
@@ -270,40 +559,39 @@ namespace environment3DPerception
         pcl::PointCloud<pcl::PointXYZRGB>::Ptr walls_cloud = extractAllVerticalPlanes(working_cloud, /*min_inliers=*/1000);
 
         auto walls_node = std::make_shared<SegmentTreeNode>();
-        walls_node->children.push_back(null_child);
 
         walls_node->object_cloud = walls_cloud;
         walls_node->object_type = PerceptionObject::WALL;
-        root->children.push_back(walls_node);
 
         // 2) Extract a floor plane => "floor" (assuming only one floor)
         pcl::PointCloud<pcl::PointXYZRGB>::Ptr floor_cloud = extractFloorPlane(working_cloud, /*min_inliers=*/200);
 
         auto floor_node = std::make_shared<SegmentTreeNode>();
-        floor_node->children.push_back(null_child);
 
         floor_node->object_cloud = floor_cloud;
         floor_node->object_type = PerceptionObject::FLOOR;
-        root->children.push_back(floor_node);
 
         // 3) Remainder => "object"
         // The leftover in working_cloud is all the stuff that isn't walls or floor
         auto object_node = std::make_shared<SegmentTreeNode>();
-        // for (int i = 0; i < working_cloud->points.size(); i++)
-        // {
-        //     working_cloud->points[i].r = 0.0;
-        //     working_cloud->points[i].g = 0.0;
-        //     working_cloud->points[i].b = 255.0;
-        // }
-        object_node->object_cloud = working_cloud;
-        object_node->children.push_back(null_child);
 
+        object_node->object_cloud = working_cloud;
         object_node->object_type = PerceptionObject::UNKNOWN_OBJECT;
+
+        root->children.push_back(walls_node);
+        root->children.push_back(floor_node);
         root->children.push_back(object_node);
+
+        walls_node->children.push_back(null_child);
+        floor_node->children.push_back(null_child);
 
         // 4) Subdivide the "object" node into smaller sub-objects (3rd level)
         subdivideObjectNode(object_node);
-
+        for (auto child_node : object_node->children)
+        {
+            std::cout << "3rd Level" << std::endl;
+            segmentTableLegsConditionalWithCleaning(child_node);
+        }
         return root;
     }
 
@@ -376,7 +664,7 @@ namespace environment3DPerception
         seg.setOptimizeCoefficients(true);
         seg.setModelType(pcl::SACMODEL_PLANE);
         seg.setMethodType(pcl::SAC_RANSAC);
-        seg.setDistanceThreshold(0.02f);
+        seg.setDistanceThreshold(0.0175f);
         seg.setInputCloud(working_cloud);
 
         pcl::PointIndices::Ptr inliers(new pcl::PointIndices);
@@ -436,56 +724,28 @@ namespace environment3DPerception
         std::vector<pcl::PointIndices> cluster_indices;
         pcl::EuclideanClusterExtraction<pcl::PointXYZRGB> ec;
         ec.setClusterTolerance(0.0175); // tune
-        ec.setMinClusterSize(25);        // tune
+        ec.setMinClusterSize(25);       // tune
         ec.setMaxClusterSize(100000);
         ec.setSearchMethod(tree);
         ec.setInputCloud(object_node->object_cloud);
         ec.extract(cluster_indices);
-        std::cout << "number of cluster extracted = " << cluster_indices.size() << std::endl;
+        // std::cout << "number of cluster extracted = " << cluster_indices.size() << std::endl;
 
         int sub_id = 0;
-        vector<vector<float>> colour = {
-            {0.0, 0.0, 255.0},     // Blue
-            {255.0, 20.0, 203.0},  // Dark Pink
-            {255.0, 255.0, 0.0},   // Yellow
-            {255.0, 165.0, 0.0},   // Orange
-            {128.0, 0.0, 128.0},   // Purple
-            {128.0, 128.0, 128.0}, // Grey
-            {0.0, 100.0, 0.0},     // Dark Green
-            {255.0, 255.0, 255.0}, // White
-            {0.0, 0.0, 0.0}        // Black
-        };
         for (auto &c_indices : cluster_indices)
         {
-            cout << "sub_id " << sub_id << std::endl;
+            // cout << "sub_id " << sub_id << std::endl;
             pcl::PointCloud<pcl::PointXYZRGB>::Ptr cluster_cloud(new pcl::PointCloud<pcl::PointXYZRGB>());
             cluster_cloud->points.reserve(c_indices.indices.size());
             for (auto idx : c_indices.indices)
             {
                 cluster_cloud->points.push_back(object_node->object_cloud->points[idx]);
             }
-            for (int i = 0; i < cluster_cloud->points.size(); i++)
-            {
-                if (sub_id < 9)
-                {
-                    cluster_cloud->points[i].r = colour[sub_id][0];
-                    cluster_cloud->points[i].g = colour[sub_id][1];
-                    cluster_cloud->points[i].b = colour[sub_id][2];
-                }
-                else
-                {
-                    cluster_cloud->points[i].r = 100.0;
-                    cluster_cloud->points[i].g = 0.0;
-                    cluster_cloud->points[i].b = 0.0;
-                }
-            }
 
             auto child_node = std::make_shared<SegmentTreeNode>();
             child_node->object_cloud = cluster_cloud;
             child_node->object_type = PerceptionObject::SUB_UNKNOWN_OBJECT;
-            auto null_child = std::make_shared<SegmentTreeNode>();
-            null_child = nullptr;
-            child_node->children.push_back(null_child);
+
             object_node->children.push_back(child_node);
             sub_id++;
         }
@@ -494,10 +754,10 @@ namespace environment3DPerception
                     cluster_indices.size());
     }
 
-    std::vector<pcl::PointCloud<pcl::PointXYZRGBNormal>::Ptr>
-    Environment3DPerception::segmentTableLegsConditionalWithCleaning(const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &input_cloud)
+    void Environment3DPerception::segmentTableLegsConditionalWithCleaning(std::shared_ptr<SegmentTreeNode> &object_node)
     {
         // ------------------ 1) Normal Estimation (OMP) ------------------ //
+        pcl::PointCloud<pcl::PointXYZRGB>::Ptr input_cloud(new pcl::PointCloud<pcl::PointXYZRGB>(*object_node->object_cloud));
         pcl::NormalEstimationOMP<pcl::PointXYZRGB, pcl::Normal> ne_omp;
         ne_omp.setNumberOfThreads(4); // use all CPU cores
         ne_omp.setInputCloud(input_cloud);
@@ -526,7 +786,7 @@ namespace environment3DPerception
         if (cleaned->empty())
         {
             std::cerr << "[Warning] All points removed after cleaning. Returning empty clusters.\n";
-            return {};
+            return;
         }
 
         // ------------------ 4) Conditional Euclidean Clustering ------------------ //
@@ -542,27 +802,51 @@ namespace environment3DPerception
         cec.segment(cluster_indices);
 
         // Build final output clusters
-        std::vector<pcl::PointCloud<pcl::PointXYZRGBNormal>::Ptr> clusters;
-        clusters.reserve(cluster_indices.size());
+        auto null_child = std::make_shared<SegmentTreeNode>();
+        null_child = nullptr;
+        int cluster_id = 0;
+        std::cout << "number of cluster level 4 " << cluster_indices.size() << std::endl;
         for (const auto &indices : cluster_indices)
         {
-            pcl::PointCloud<pcl::PointXYZRGBNormal>::Ptr cluster(new pcl::PointCloud<pcl::PointXYZRGBNormal>);
-            cluster->reserve(indices.indices.size());
+            pcl::PointCloud<pcl::Normal>::Ptr object_normals(new pcl::PointCloud<pcl::Normal>());
+            // cluster i
+            std::cout << "cluster_id = " << cluster_id << std::endl;
+            std::shared_ptr<SegmentTreeNode> child = std::make_shared<SegmentTreeNode>();
+            child->object_cloud->points.reserve(indices.indices.size());
             for (int idx : indices.indices)
             {
-                cluster->push_back(cleaned->points[idx]);
-            }
-            clusters.push_back(cluster);
-        }
+                pcl::PointXYZRGB point;
+                point.x = cleaned->points[idx].x;
+                point.y = cleaned->points[idx].y;
+                point.z = cleaned->points[idx].z;
+                point.r = colour[0][0];
+                point.g = colour[0][1];
+                point.b = colour[0][2];
+                child->object_cloud->points.push_back(point);
 
-        return clusters;
+                pcl::Normal normal_;
+                normal_.normal_x = cleaned->points[idx].normal_x;
+                normal_.normal_y = cleaned->points[idx].normal_y;
+                normal_.normal_z = cleaned->points[idx].normal_z;
+                object_normals->points.push_back(normal_);
+            }
+            double r0 = colour[0][0] / 255;
+            double g0 = colour[0][1] / 255;
+            double b0 = colour[0][2] / 255;
+            auto shape = shape_extraction->fitBestBoundingBox(child->object_cloud, object_normals, r0, g0, b0);
+            cluster_id++;
+            colour.erase(colour.begin());
+            child->object_type = PerceptionObject::SUB_UNKNOWN_OBJECT;
+            child->children.push_back(null_child);
+            object_node->children.push_back(child);
+        }
     }
 
     bool SegmentationCondition::tableLegCondition(const pcl::PointXYZRGBNormal &p1, const pcl::PointXYZRGBNormal &p2, float squared_distance)
     {
         // Some thresholds:
-        const float distance_thresh = 0.0175;  // 2 cm
-        const float orientation_thresh = 0.3f; // how different normal_z can be
+        const float distance_thresh = 0.0175;
+        const float orientation_thresh = 0.15; // how different normal_z can be
 
         // dot with Z ~ absolute value of normal_z (assuming unit-length normals)
         float dot1_with_z = std::fabs(p1.normal_z);
