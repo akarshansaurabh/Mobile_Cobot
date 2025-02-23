@@ -107,12 +107,7 @@ namespace visualization
             marker_array.markers.push_back(marker);
         }
 
-        // Publish all the delete commands
         marker_pub_->publish(marker_array);
-
-        // RCLCPP_INFO(node_->get_logger(),
-        //             "Deleted markers in namespace '%s' with IDs [%d..%d].",
-        //             marker_namespace.c_str(), start_id, end_id);
     }
 
     void VisualizationManager::publishTableVertices(const std::vector<geometry_msgs::msg::Point> &vertices)
@@ -317,7 +312,7 @@ namespace visualization
         visualization_msgs::msg::Marker marker;
         marker.header.frame_id = target_frame_;
         marker.header.stamp = node_->now();
-        marker.ns = "cuboid";
+        marker.ns = "boundingbox";
         marker.id = this->id_;
         marker.type = visualization_msgs::msg::Marker::CUBE;
         marker.action = visualization_msgs::msg::Marker::ADD;
@@ -342,13 +337,14 @@ namespace visualization
         visualization_msgs::msg::Marker marker;
         marker.header.frame_id = target_frame_;
         marker.header.stamp = node_->now();
-        marker.ns = "cylinder";
+        marker.ns = "boundingbox";
         marker.id = this->id_;
         marker.type = visualization_msgs::msg::Marker::CYLINDER;
         marker.action = visualization_msgs::msg::Marker::ADD;
         marker.pose = shape_3d.pose;
         marker.scale.x = (2.0 * shape_3d.R);
         marker.scale.y = (2.0 * shape_3d.R);
+        std::cout << "height = " << shape_3d.h << std::endl;
         marker.scale.z = shape_3d.h;
         marker.color.r = shape_3d.r;
         marker.color.g = shape_3d.g;
@@ -362,4 +358,98 @@ namespace visualization
         this->id_++;
     }
 
+    void VisualizationManager::publishFilledPolygon(const std::vector<geometry_msgs::msg::Point> &polygon_points,
+                                                    float r, float g, float b, float alpha)
+    {
+        // 1. Basic check
+        if (polygon_points.size() < 3)
+        {
+            RCLCPP_WARN(node_->get_logger(), "Polygon must have at least 3 points to form a filled shape.");
+            return;
+        }
+
+        // 2. Create a TRIANGLE_LIST marker
+        visualization_msgs::msg::Marker marker;
+        marker.header.frame_id = target_frame_;
+        marker.header.stamp = node_->now();
+        marker.ns = "boundingbox";
+        marker.id = id_++;
+        marker.type = visualization_msgs::msg::Marker::TRIANGLE_LIST;
+        marker.action = visualization_msgs::msg::Marker::ADD;
+
+        // 3. Set color (use alpha for transparency if desired)
+        marker.color.r = r;
+        marker.color.g = g;
+        marker.color.b = b;
+        marker.color.a = alpha;
+
+        // 4. Scale is irrelevant for TRIANGLE_LIST (it uses actual point coords)
+        marker.scale.x = 1.0;
+        marker.scale.y = 1.0;
+        marker.scale.z = 1.0;
+
+        // 5. Optional pose (identity)
+        // marker.pose.orientation.w = 1.0; // no rotation
+        // marker.pose.position.x = 0.0;
+        // marker.pose.position.y = 0.0;
+        // marker.pose.position.z = 0.0;
+
+        // 6. Triangulate using a "fan" approach around polygon_points[0]
+        //    (Assumes the polygon is convex)
+        for (size_t i = 1; i + 1 < polygon_points.size(); ++i)
+        {
+            marker.points.push_back(polygon_points[0]);
+            marker.points.push_back(polygon_points[i]);
+            marker.points.push_back(polygon_points[i + 1]);
+        }
+
+        // 7. Publish as a MarkerArray
+        visualization_msgs::msg::MarkerArray marker_array;
+        marker_array.markers.push_back(marker);
+        marker_pub_->publish(marker_array);
+    }
+    void VisualizationManager::publishPeripheryLineStrip(const std::vector<geometry_msgs::msg::Point> &hull_points,
+                                                         float r, float g, float b)
+    {
+        if (hull_points.empty())
+        {
+            RCLCPP_WARN(node_->get_logger(), "[publishPeripheryLineStrip] No points provided. Aborting.");
+            return;
+        }
+
+        // Create a LINE_STRIP marker
+        visualization_msgs::msg::Marker marker;
+        marker.header.frame_id = target_frame_;
+        marker.header.stamp = node_->now();
+        marker.ns = "boundingbox";
+        marker.id = id_++;
+        marker.type = visualization_msgs::msg::Marker::LINE_STRIP;
+        marker.action = visualization_msgs::msg::Marker::ADD;
+
+        // Set the scale (line thickness)
+        marker.scale.x = 0.02;
+        marker.scale.y = 0.0; // not used by LINE_STRIP
+        marker.scale.z = 0.0; // not used by LINE_STRIP
+
+        // Set color (fully opaque)
+        marker.color.r = r;
+        marker.color.g = g;
+        marker.color.b = b;
+        marker.color.a = 1.0f;
+
+        // Add the hull points
+        for (const auto &pt : hull_points)
+        {
+            marker.points.push_back(pt);
+        }
+
+        // Optionally close the loop by repeating the first point
+
+        marker.points.push_back(hull_points.front());
+
+        // Publish via MarkerArray
+        visualization_msgs::msg::MarkerArray marker_array;
+        marker_array.markers.push_back(marker);
+        marker_pub_->publish(marker_array);
+    }
 }

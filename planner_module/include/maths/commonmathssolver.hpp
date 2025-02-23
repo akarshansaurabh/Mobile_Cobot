@@ -16,6 +16,7 @@ namespace CommonMathsSolver
     {
         Eigen::Vector3d FindUnitNormal(const Eigen::Vector3d &p1, const Eigen::Vector3d &p2, const Eigen::Vector3d &p3);
         double AngleBetween(const Eigen::Vector3d &v1, const Eigen::Vector3d &v2);
+        Eigen::Vector3d UnitTangent(const Eigen::Vector3d &p1, const Eigen::Vector3d &p2);
     }
     namespace OrientationNTransformaton
     {

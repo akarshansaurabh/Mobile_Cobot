@@ -146,4 +146,10 @@ namespace CommonMathsSolver
             cosAngle = -1.0;
         return std::acos(cosAngle);
     }
+    Eigen::Vector3d Vectors3D::UnitTangent(const Eigen::Vector3d &p1, const Eigen::Vector3d &p2)
+    {
+        Eigen::Vector3d tangent = p2 - p1;
+        return tangent.normalized();
+    }
+
 }
