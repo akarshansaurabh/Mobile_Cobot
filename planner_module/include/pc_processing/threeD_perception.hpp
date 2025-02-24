@@ -50,8 +50,7 @@
 #include "visualizations/visualization_manager.hpp"
 
 #include <iostream>
-#include <memory>
-#include <queue>
+
 #include "planner_module/waypoint_gen.hpp"
 #include "custom_interfaces/srv/boxpose_estimator.hpp"
 #include "custom_interfaces/msg/table_vertices.hpp"
@@ -60,8 +59,14 @@
 #include <future>
 #include <limits>
 
+#include <memory>
+#include <queue>
+#include <unordered_map>
+#include <unordered_set>
+
 #include "miscellaneous/conversion.hpp"
 #include "maths/commonmathssolver.hpp"
+#include "maths/curves.hpp"
 
 namespace environment3DPerception
 {
@@ -78,7 +83,7 @@ namespace environment3DPerception
     {
         pcl::PointCloud<pcl::PointXYZRGB>::Ptr object_cloud;
         PerceptionObject object_type;
-        Eigen::Vector3f min_pt, max_pt;
+        Eigen::Vector3f min_pt, max_pt, avg_normal;
         std::vector<std::shared_ptr<SegmentTreeNode>> children;
 
         SegmentTreeNode() : object_cloud(new pcl::PointCloud<pcl::PointXYZRGB>()) {}
@@ -96,13 +101,15 @@ namespace environment3DPerception
     private:
         std::shared_ptr<SegmentTreeNode> findParentBFS(std::shared_ptr<SegmentTreeNode> root, std::shared_ptr<SegmentTreeNode> child);
         bool removeChild(std::shared_ptr<SegmentTreeNode> parent, std::shared_ptr<SegmentTreeNode> childToRemove);
-        bool replaceTwoChildren(std::shared_ptr<SegmentTreeNode> parent, std::shared_ptr<SegmentTreeNode> childA,
-                                std::shared_ptr<SegmentTreeNode> childB, std::shared_ptr<SegmentTreeNode> newChild);
+        bool replaceNChildren(std::shared_ptr<SegmentTreeNode> parent, std::shared_ptr<SegmentTreeNode> newChild,
+                              std::vector<std::shared_ptr<SegmentTreeNode>> children_to_be_removed);
+        void FindAllMergeablePairs(std::shared_ptr<SegmentTreeNode> &root);
+        std::vector<std::vector<std::shared_ptr<SegmentTreeNode>>> ConsolidateMergablePairs();
 
     public:
-        // [c11,c12,c13],[c21,c22]
-        std::vector<std::vector<std::shared_ptr<SegmentTreeNode>>> mergable_children;
-        void FindMergeableClusters();
+        std::vector<std::pair<std::shared_ptr<SegmentTreeNode>, std::shared_ptr<SegmentTreeNode>>> mergable_children;
+        void ModifySegmentationTree(std::shared_ptr<SegmentTreeNode> &root);
+        std::vector<std::shared_ptr<SegmentTreeNode>> FindNthLevelNodes(std::shared_ptr<SegmentTreeNode> &root, int n_level);
     };
 
     class ShapeExtraction
@@ -160,7 +167,7 @@ namespace environment3DPerception
 
         // Mutex for shared cloud
         std::mutex cloud_mutex_;
-        pcl::PointCloud<pcl::PointXYZRGB>::Ptr environment_3d_pointcloud_;
+        pcl::PointCloud<pcl::PointXYZRGB>::Ptr environment_3d_pointcloud_,segmented_pcl_cloud_;
 
         // Parameter: activate_3d_perception
         std::string activate_3d_perception_;
