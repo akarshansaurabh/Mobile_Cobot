@@ -82,7 +82,8 @@ add_executable(pc_processing1 src/pc_processing/pointcloud_processor.cpp src/pla
                src/main/pc_processing_main1.cpp src/visualizations/visualization_manager.cpp
                src/pc_processing/octomap_generator.cpp src/visualizations/visualization_manager.cpp
                src/planner_module/collision_free_planner.cpp src/planner_module/kinematics.cpp
-               src/maths/curves.cpp src/maths/commonmathssolver.cpp src/pc_processing/threeD_perception.cpp)
+               src/maths/curves.cpp src/maths/commonmathssolver.cpp src/pc_processing/threeD_perception.cpp
+               src/pc_processing/cad_registration.cpp)
 ament_target_dependencies(pc_processing1
   rclcpp
   tf2_ros

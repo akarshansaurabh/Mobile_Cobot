@@ -1,0 +1,45 @@
+<?xml version="1.0" ?>
+<sdf version="1.6">
+  <model name="my_chair">
+    <!-- If you want it immovable, change to 'true' -->
+    <pose>1.0 2.0 0 1.57 0 1.57</pose>
+    <static>false</static>
+
+    <link name="chair_link">
+      <!-- Inertial properties (basic example) -->
+      <inertial>
+        <mass>1.0</mass>
+        <inertia>
+          <ixx>1.0</ixx>
+          <ixy>0.0</ixy>
+          <ixz>0.0</ixz>
+          <iyy>1.0</iyy>
+          <iyz>0.0</iyz>
+          <izz>1.0</izz>
+        </inertia>
+      </inertial>
+
+      <!-- Visual representation of the chair -->
+      <visual name="chair_visual">
+        <geometry>
+          <mesh>
+            <uri>model://my_chair/meshes/high_chair.stl</uri>
+            <!-- Adjust scale if needed -->
+            <scale>0.01 0.01 0.01</scale>
+          </mesh>
+        </geometry>
+      </visual>
+
+      <!-- Collision: use a simplified box for performance -->
+      <collision name="chair_collision">
+        <geometry>
+          <mesh>
+            <uri>model://my_chair/meshes/high_chair.stl</uri>
+            <!-- Adjust scale if needed -->
+            <scale>0.01 0.01 0.01</scale>
+          </mesh>
+        </geometry>
+      </collision>
+    </link>
+  </model>
+</sdf>

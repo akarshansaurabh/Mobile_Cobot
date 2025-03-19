@@ -11,13 +11,14 @@ namespace visualization
 
         node_->get_parameter_or<std::string>("target_frame_", target_frame_, "map");
         this->id_ = 0;
+        current_marker_id=0;
     }
 
     void VisualizationManager::publishMarkerArray(const std::vector<geometry_msgs::msg::Pose> &poses)
     {
-        deleteMarkersInRange(0, 75, "vectors");
+        // deleteMarkersInRange(0, 75, "vectors");
         visualization_msgs::msg::MarkerArray marker_array;
-        int current_marker_id = 0;
+        current_marker_id;
 
         for (const auto &pose : poses)
         {
@@ -69,13 +70,13 @@ namespace visualization
 
         marker.points.resize(2);
         marker.points[0] = origin;
-        marker.points[1].x = origin.x + vector.x * 0.1;
-        marker.points[1].y = origin.y + vector.y * 0.1;
-        marker.points[1].z = origin.z + vector.z * 0.1;
+        marker.points[1].x = origin.x + vector.x * 0.2;
+        marker.points[1].y = origin.y + vector.y * 0.2;
+        marker.points[1].z = origin.z + vector.z * 0.2;
 
-        marker.scale.x = 0.0125f;
-        marker.scale.y = 0.025f;
-        marker.scale.z = 0.025f;
+        marker.scale.x = 0.015;
+        marker.scale.y = 0.03;
+        marker.scale.z = 0.03;
 
         marker.color.r = r;
         marker.color.g = g;
@@ -328,7 +329,9 @@ namespace visualization
 
         visualization_msgs::msg::MarkerArray marker_array;
         marker_array.markers.push_back(marker);
-        marker_pub_->publish(marker_array);
+        // marker_pub_->publish(marker_array);
+        std::vector<geometry_msgs::msg::Pose> pose_vec = {shape_3d.pose};
+        publishMarkerArray(pose_vec);
         this->id_++;
     }
 

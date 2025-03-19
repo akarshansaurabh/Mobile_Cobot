@@ -150,7 +150,7 @@
         <material>Gazebo/Blue</material>
         <sensor name="rear_rgbd_cam_sensor" type="camera">
             <pose>0 0 0 0 3.1416 0</pose>
-            <visualize>true</visualize>
+            <visualize>false</visualize>
             <update_rate>10.0</update_rate>
 
             <camera>
@@ -181,7 +181,7 @@
         <material>Gazebo/Blue</material>
         <sensor name="right_rgbd_cam_sensor" type="camera">
             <pose>0 0 0 0 0 0</pose>
-            <visualize>true</visualize>
+            <visualize>false</visualize>
             <update_rate>10.0</update_rate>
 
             <camera>
@@ -212,7 +212,7 @@
         <material>Gazebo/Blue</material>
         <sensor name="left_rgbd_cam_sensor" type="camera">
             <pose>0 0 0 0 0 0</pose>
-            <visualize>true</visualize>
+            <visualize>false</visualize>
             <update_rate>10.0</update_rate>
 
             <camera>
@@ -243,7 +243,7 @@
         <material>Gazebo/Black</material>
         <sensor name="lidar_sensor" type="ray">
             <pose>0 0 0 0 0 0</pose>
-            <visualize>true</visualize>
+            <visualize>false</visualize>
             <update_rate>10.0</update_rate>
 
             <ray>

@@ -75,6 +75,7 @@ namespace environment3DPerception
 
         for (const auto &gruop : gruops_of_merged_clusters)
         {
+            // each node of gruop must have same parent
             auto children_to_be_removed = gruop;
             bool common_parent = true;
             std::shared_ptr<SegmentTreeNode> parent = std::make_shared<SegmentTreeNode>();
@@ -93,6 +94,7 @@ namespace environment3DPerception
             }
             if (common_parent)
             {
+                // replace the gruop with new child
                 new_child->object_type = PerceptionObject::SUB_UNKNOWN_OBJECT;
                 auto null_child = std::make_shared<SegmentTreeNode>();
                 new_child->children.push_back(null_child);
@@ -106,11 +108,11 @@ namespace environment3DPerception
 
     std::vector<std::vector<std::shared_ptr<SegmentTreeNode>>> TreeAlgoSolver::ConsolidateMergablePairs()
     {
-        // 1) Build a list of all unique nodes from mergable_children
+        // 1) Build a list of all unique nodes from merged_pair_vector
         std::vector<std::shared_ptr<SegmentTreeNode>> all_nodes;
-        all_nodes.reserve(mergable_children.size() * 2); // rough estimate
+        all_nodes.reserve(merged_pair_vector.size() * 2); // rough estimate
 
-        for (const auto &pairVec : mergable_children)
+        for (const auto &pairVec : merged_pair_vector)
         {
             for (int i = 0; i < 2; i++)
             {
@@ -153,7 +155,7 @@ namespace environment3DPerception
         for (auto &node : all_nodes)
             adjacency_map[node] = {};
         // Fill adjacency_map based on pairs
-        for (const auto &pairVec : mergable_children)
+        for (const auto &pairVec : merged_pair_vector)
         {
             adjacency_map[pairVec.first].push_back(pairVec.second);
             adjacency_map[pairVec.second].push_back(pairVec.first);
@@ -238,7 +240,7 @@ namespace environment3DPerception
     void TreeAlgoSolver::FindAllMergeablePairs(std::shared_ptr<SegmentTreeNode> &root)
     {
         // 1) Clear any existing data
-        mergable_children.clear();
+        merged_pair_vector.clear();
         // 2) Gather all nodes at level 3
         std::vector<std::shared_ptr<SegmentTreeNode>> level3_nodes = FindNthLevelNodes(root, 3);
         // If fewer than 2 nodes at level 3, no merges possible
@@ -249,7 +251,7 @@ namespace environment3DPerception
         }
 
         // 3) Define a threshold for "nearly equal"
-        const float threshold = 0.02;
+        const float threshold = 0.03;
 
         auto nearlyEqual = [&](float a, float b)
         {
@@ -261,23 +263,23 @@ namespace environment3DPerception
             return (nearlyEqual(minA, minB) && nearlyEqual(maxA, maxB));
         };
 
-        auto dimensionCheck = [&](std::shared_ptr<SegmentTreeNode> A,
-                                  std::shared_ptr<SegmentTreeNode> B) -> bool
+        auto dimensionCheck = [&](std::shared_ptr<SegmentTreeNode> clusterA,
+                                  std::shared_ptr<SegmentTreeNode> clusterB) -> bool
         {
-            bool cond1 = matchDim(A->min_pt.x(), A->max_pt.x(),
-                                  B->min_pt.x(), B->max_pt.x()) &&
-                         matchDim(A->min_pt.y(), A->max_pt.y(),
-                                  B->min_pt.y(), B->max_pt.y());
+            bool cond1 = matchDim(clusterA->min_pt.x(), clusterA->max_pt.x(),
+                                  clusterB->min_pt.x(), clusterB->max_pt.x()) &&
+                         matchDim(clusterA->min_pt.y(), clusterA->max_pt.y(),
+                                  clusterB->min_pt.y(), clusterB->max_pt.y());
 
-            bool cond2 = matchDim(A->min_pt.x(), A->max_pt.x(),
-                                  B->min_pt.x(), B->max_pt.x()) &&
-                         matchDim(A->min_pt.z(), A->max_pt.z(),
-                                  B->min_pt.z(), B->max_pt.z());
+            bool cond2 = matchDim(clusterA->min_pt.x(), clusterA->max_pt.x(),
+                                  clusterB->min_pt.x(), clusterB->max_pt.x()) &&
+                         matchDim(clusterA->min_pt.z(), clusterA->max_pt.z(),
+                                  clusterB->min_pt.z(), clusterB->max_pt.z());
 
-            bool cond3 = matchDim(A->min_pt.y(), A->max_pt.y(),
-                                  B->min_pt.y(), B->max_pt.y()) &&
-                         matchDim(A->min_pt.z(), A->max_pt.z(),
-                                  B->min_pt.z(), B->max_pt.z());
+            bool cond3 = matchDim(clusterA->min_pt.y(), clusterA->max_pt.y(),
+                                  clusterB->min_pt.y(), clusterB->max_pt.y()) &&
+                         matchDim(clusterA->min_pt.z(), clusterA->max_pt.z(),
+                                  clusterB->min_pt.z(), clusterB->max_pt.z());
 
             return (cond1 || cond2 || cond3);
         };
@@ -304,13 +306,13 @@ namespace environment3DPerception
                     {
                         if (CommonMathsSolver::Vectors3D::AngleBetween(n1, n2) * Conversions::rad_to_deg < 10.0)
                         {
-                            mergable_children.push_back(make_pair(nodeA, nodeB));
+                            merged_pair_vector.push_back(make_pair(nodeA, nodeB));
                         }
                     }
                 }
             }
         }
-        std::cout << "[FindAllMergeablePairs] Found " << mergable_children.size()
+        std::cout << "[FindAllMergeablePairs] Found " << merged_pair_vector.size()
                   << " mergeable pairs at level 3.\n";
     }
 
@@ -444,6 +446,17 @@ namespace environment3DPerception
         feature_extractor.getAABB(min_point_AABB, max_point_AABB);
         feature_extractor.getOBB(min_point_OBB, max_point_OBB, position_OBB, rotational_matrix_OBB);
         Eigen::Matrix3d rotation_matrix = rotational_matrix_OBB.cast<double>();
+        Eigen::Vector3d x_cap = rotation_matrix.col(0);
+        Eigen::Vector3d y_cap = rotation_matrix.col(1);
+        Eigen::Vector3d z_cap = rotation_matrix.col(2);
+        if (z_cap.dot(Eigen::Vector3d(0, 0, 1)) < 0.0)
+        {
+            z_cap = -z_cap;
+            y_cap = z_cap.cross(x_cap).normalized();
+            rotation_matrix.col(0) = x_cap;
+            rotation_matrix.col(1) = y_cap;
+            rotation_matrix.col(2) = z_cap;
+        }
 
         shape_3d.pose.position.x = position_OBB.x;
         shape_3d.pose.position.y = position_OBB.y;
@@ -606,23 +619,7 @@ namespace environment3DPerception
             return false;
         else
         {
-            // visualization::Shape3D ans;
-            // ans.r = Rc;
-            // ans.g = Gc;
-            // ans.b = Bc;
-            // Eigen::Vector3f min_pt, max_pt;
-            // computeAABB(input_cloud, min_pt, max_pt);
-            // ans.L = max_pt.x() - min_pt.x();
-            // ans.B = max_pt.y() - min_pt.y();
-            // ans.H = max_pt.z() - min_pt.z();
-            // ans.pose.position.x = (max_pt.x() + min_pt.x()) / 2.0;
-            // ans.pose.position.y = (max_pt.y() + min_pt.y()) / 2.0;
-            // ans.pose.position.z = (max_pt.z() + min_pt.z()) / 2.0;
-            // Eigen::Matrix3d R;
-            // R.setIdentity();
-            // ans.pose.orientation = Conversions::EigenM_2ROSQuat(R);
             std::vector<geometry_msgs::msg::Point> dense_plane;
-
             for (int i = 0; i < vertexes.size() - 1; i++)
             {
                 for (int j = i + 1; j < vertexes.size(); j++)
@@ -866,10 +863,6 @@ namespace environment3DPerception
     {
         if (!node)
             return;
-
-        for (int i = 0; i < level + 1; i++)
-            std::cout << " ";
-        std::cout << "A" << std::endl;
 
         *segmented_pcl_cloud += *node->object_cloud;
         for (auto &child : node->children)
@@ -1183,7 +1176,8 @@ namespace environment3DPerception
                 auto shape = shape_extraction->fitBestBoundingBox(individual_segment->object_cloud, normals, r0, g0, b0);
             }
             level3_counter++;
-            colour.erase(colour.begin());
+            if (colour.size() > 1)
+                colour.erase(colour.begin());
         }
 
         return root;
@@ -1345,7 +1339,7 @@ namespace environment3DPerception
 
         pcl::search::KdTree<pcl::PointXYZRGB>::Ptr raw_tree(new pcl::search::KdTree<pcl::PointXYZRGB>());
         ne_omp.setSearchMethod(raw_tree);
-        ne_omp.setKSearch(20); // want at least 10 neighbors
+        ne_omp.setKSearch(20); // want at least 20 neighbors
 
         pcl::PointCloud<pcl::Normal>::Ptr normals(new pcl::PointCloud<pcl::Normal>);
         ne_omp.compute(*normals);
@@ -1415,7 +1409,8 @@ namespace environment3DPerception
             child->avg_normal = avg_normal;
             shape_extraction->computeAABB(child->object_cloud, child->min_pt, child->max_pt);
             cluster_id++;
-            colour.erase(colour.begin());
+            if (colour.size() > 1)
+                colour.erase(colour.begin());
             child->object_type = PerceptionObject::SUB_UNKNOWN_OBJECT;
             child->children.push_back(null_child);
             object_node->children.push_back(child);
@@ -1424,9 +1419,7 @@ namespace environment3DPerception
 
     bool SegmentationCondition::tableLegCondition(const pcl::PointXYZRGBNormal &p1, const pcl::PointXYZRGBNormal &p2, float squared_distance)
     {
-        // Some thresholds:
         const float distance_thresh = 0.0175;
-        const float orientation_thresh = 0.1; // how different normal_z can be
 
         // dot with Z ~ absolute value of normal_z (assuming unit-length normals)
         Eigen::Vector3d zcap(0.0, 0.0, 1.0);
@@ -1442,7 +1435,7 @@ namespace environment3DPerception
             return false;
 
         float diff2 = std::fabs(theta1_z - theta2_z);
-        if (diff2 < 10.0 && theta_n1n2 < 10.0)
+        if (theta_n1n2 < 10.0)
             return true;
 
         return false;

@@ -107,7 +107,7 @@ namespace environment3DPerception
         std::vector<std::vector<std::shared_ptr<SegmentTreeNode>>> ConsolidateMergablePairs();
 
     public:
-        std::vector<std::pair<std::shared_ptr<SegmentTreeNode>, std::shared_ptr<SegmentTreeNode>>> mergable_children;
+        std::vector<std::pair<std::shared_ptr<SegmentTreeNode>, std::shared_ptr<SegmentTreeNode>>> merged_pair_vector;
         void ModifySegmentationTree(std::shared_ptr<SegmentTreeNode> &root);
         std::vector<std::shared_ptr<SegmentTreeNode>> FindNthLevelNodes(std::shared_ptr<SegmentTreeNode> &root, int n_level);
     };

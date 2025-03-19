@@ -47,7 +47,7 @@ namespace visualization
         void publishCylinderMarker(const Shape3D &shape_3d);
         void publishPeripheryLineStrip(const std::vector<geometry_msgs::msg::Point> &hull_points,
                                        float r, float g, float b);
-        int id_;
+        int id_, current_marker_id;
         rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr marker_pub_;
 
     private:
